@@ -90,6 +90,13 @@ STYLE_PROFILES = {
         "image": "Viral social media aesthetic. Bold high-contrast, eye-catching. Bright saturated colors, dynamic angles, designed to stop the scroll.",
         "research": "Find the most shocking, surprising, counterintuitive or debated angles. What makes people share and react?",
     },
+    "Tech Tutorial & Code Tricks": {
+        "script": "Write punchy, highly engaging developer content for Python and programming. Open with a jaw-dropping hook in the first 5 seconds (e.g., 'Stop writing Python loops like this!'). Provide clear, concise code tricks, best practices, and pro-level developer tips.",
+        "tts": "(Speaking with an energetic, articulate, and passionate tech presenter tone — crisp, authoritative, yet approachable)",
+        "video": "Sleek dark-mode IDE interface with animated Python code lines, glowing cyberpunk neon accents, futuristic developer workstation, 4K resolution.",
+        "image": "Cinematic dark-mode code editor with glowing syntax highlighting for Python code, vibrant neon purple and cyan accents, 4K render.",
+        "research": "Focus on high-impact Python tricks, unexpected features, clean code paradigms, efficiency boosts, and hidden gems.",
+    },
     "Product Ad": {
         "script": "Write a persuasive benefit-focused advertisement. Lead with the problem, introduce the solution, highlight 3 key benefits, include social proof, and close with a compelling call to action.",
         "tts": "(Speaking in a warm, confident, trustworthy sales voice — enthusiastic but professional and persuasive)",
