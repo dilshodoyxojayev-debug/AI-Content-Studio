@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-generate_python_content.py
+generate_content.py
 
-Dedicated CLI automation script for generating high-retention Python tutorial and developer video content
-using Nullpk AI Content Studio.
+CLI script for automated AI video generation using Nullpk AI Content Studio.
+Supports Python tutorials, Cinematic Nature/Animal Facts, Documentaries, and Shorts/Reels/TikToks.
 """
 
 import argparse
@@ -23,10 +23,10 @@ def setup_logging():
     )
 
 def main():
-    parser = argparse.ArgumentParser(description="Automated Python Video Generation CLI")
-    parser.add_argument("--topic", type=str, default="5 Python Tricks You Wish You Knew Sooner!", help="Video topic")
-    parser.add_argument("--aspect-ratio", type=str, choices=["16:9", "9:16"], default="16:9", help="Aspect ratio: 16:9 for YouTube Long-form, 9:16 for Shorts")
-    parser.add_argument("--style", type=str, default="Tech Tutorial & Code Tricks", help="Content style profile")
+    parser = argparse.ArgumentParser(description="Automated Content Video Generation CLI")
+    parser.add_argument("--topic", type=str, default="5 Mind-Blowing Facts About Nature and the Animal Kingdom!", help="Video topic")
+    parser.add_argument("--aspect-ratio", type=str, choices=["16:9", "9:16"], default="9:16", help="Aspect ratio: 16:9 for YouTube Long-form, 9:16 for Shorts/Reels/TikTok")
+    parser.add_argument("--style", type=str, default="Documentary", help="Content style profile (e.g., 'Documentary', 'Viral Video', 'Tech Tutorial & Code Tricks')")
     parser.add_argument("--language", type=str, default="English", help="Target language")
 
     args = parser.parse_args()
