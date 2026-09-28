@@ -178,8 +178,11 @@ class NewsApiClient:
 class GoogleClient:
     """Client for all Google Generative AI interactions, now acting as a Unified Text Orchestrator."""
     def __init__(self, config):
-        self.config = config
-        self.api_key = config.get("GEMINI_API_KEY")
+        if isinstance(config, str):
+            self.config = {"GEMINI_API_KEY": config}
+        else:
+            self.config = config or {}
+        self.api_key = self.config.get("GEMINI_API_KEY")
         if not self.api_key:
             logging.warning("Google API key is missing. Ensure Ollama or WaveSpeed is selected for text generation.")
         else:
@@ -498,6 +501,52 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
                 "text_prompt": f"A graphic design for a YouTube thumbnail title card. A dark blue background with the text '{title_text}' in large, bold, yellow and white font."
             }
     
+    @handle_api_errors
+    def analyze_competitors_and_trends(self, competitor_data_summary: str, niche: str = "US Audience") -> list:
+        """Analyzes competitor content and trending topics to propose high-performing video ideas for US audience."""
+        logging.info("Analyzing competitor data and generating trending video topic proposals...")
+        prompt = f"""
+Act as a top YouTube strategist specializing in high-growth US channels.
+Analyze the following competitor data and trending insights for the niche/topic: '{niche}'.
+
+COMPETITOR & TREND DATA:
+{competitor_data_summary}
+
+YOUR TASK:
+Generate 5 high-potential, viral video topic proposals optimized for the US YouTube audience (written in English).
+For each proposal, provide:
+1. "topic": A clear, punchy video topic/subject name.
+2. "title": An irresistible, click-worthy YouTube title (under 70 chars).
+3. "angle": Why this video will perform well based on current trends and competitor gaps.
+4. "hook": A 1-sentence opening hook to grab viewers in the first 5 seconds.
+
+Return your response ONLY as a valid JSON list of 5 objects with keys: "topic", "title", "angle", "hook".
+No markdown formatting other than raw JSON or ```json block.
+"""
+        response_text = self._generate_text(prompt, as_json=True)
+        try:
+            text = response_text.strip()
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            proposals = json.loads(text)
+            if isinstance(proposals, list):
+                return proposals
+            elif isinstance(proposals, dict) and "topics" in proposals:
+                return proposals["topics"]
+            return [proposals]
+        except Exception as e:
+            logging.error(f"Failed to parse trend proposals JSON: {e}. Raw response: {response_text}")
+            return [
+                {
+                    "topic": f"{niche} - Emerging Trends",
+                    "title": f"The Truth About {niche} in 2025",
+                    "angle": "High search volume and listener interest.",
+                    "hook": f"What if everything you knew about {niche} was about to change?"
+                }
+            ]
+
     @handle_api_errors
     def generate_chapter_titles(self, script: str) -> list:
         logging.info("Identifying logical chapter titles from script...")
