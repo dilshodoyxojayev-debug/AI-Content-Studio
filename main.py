@@ -36,6 +36,7 @@ from google.auth.transport.requests import Request
 from config import load_config, save_config
 from pipeline import Pipeline
 from api_clients import GoogleClient, NewsApiClient
+from competitor_tracker import CompetitorTracker
 
 # --- Constants for GUI Dropdowns ---
 PIPELINE_STEPS = [
@@ -48,7 +49,7 @@ PIPELINE_STEPS = [
     "Audio (TTS)",
     "Generate Timed Images",
     "Video Generation",
-    "Add Background Music", 
+    "Add Background Music",
     "Create Final Video",
     "Generate SEO Metadata",   # <-- MOVED UP
     "Generate Timestamps",     # <-- MOVED DOWN
@@ -97,26 +98,26 @@ class ScriptEditorWindow(ctk.CTkToplevel):
         self.title("📝 Script Editor & Review")
         self.geometry("800x600")
         self.attributes("-topmost", True)
-        
+
         self.file_path = file_path
         self.resume_event = resume_event
-        
+
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
+
         ctk.CTkLabel(self, text="Review and edit the generated script before continuing.", font=("Arial", 14, "bold")).grid(row=0, column=0, pady=10, padx=10, sticky="w")
-        
+
         self.textbox = ctk.CTkTextbox(self, font=("Arial", 14), wrap="word")
         self.textbox.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         self.textbox.insert("1.0", script_content)
-        
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=2, column=0, pady=10)
-        
+
         ctk.CTkButton(btn_frame, text="✅ Approve & Continue", fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", font=("Arial", 14, "bold"), command=self.approve_script).pack(side="left", padx=10)
-        
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-        
+
     def approve_script(self):
         edited_script = self.textbox.get("1.0", "end-1c")
         with open(self.file_path, "w", encoding="utf-8") as f:
@@ -124,7 +125,7 @@ class ScriptEditorWindow(ctk.CTkToplevel):
         logging.info("Script approved by user. Resuming pipeline...")
         self.resume_event.set()
         self.destroy()
-        
+
     def on_close(self):
         import logging
         logging.warning("Script editor closed without approval. Proceeding with unedited script.")
@@ -137,52 +138,52 @@ class AgentStoryboardWindow(ctk.CTkToplevel):
         self.title("🎬 Director's Storyboard Editor")
         self.geometry("900x700")
         self.attributes("-topmost", True)
-        
+
         self.file_path = file_path
         self.resume_event = resume_event
         self.scenes = scenes
         self.scene_widgets = []
-        
+
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
+
         ctk.CTkLabel(self, text="Review and tweak the visual prompts for each scene before generation.", font=("Arial", 16, "bold"), text_color="#00E5FF").grid(row=0, column=0, pady=10, padx=10, sticky="w")
-        
+
         # Scrollable Frame for scenes
         self.scroll_frame = ctk.CTkScrollableFrame(self)
         self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         self.scroll_frame.grid_columnconfigure(0, weight=1)
-        
+
         for i, scene in enumerate(self.scenes):
             scene_frame = ctk.CTkFrame(self.scroll_frame, fg_color="#181824", corner_radius=10)
             scene_frame.grid(row=i, column=0, sticky="ew", padx=5, pady=10)
             scene_frame.grid_columnconfigure(1, weight=1)
-            
+
             ctk.CTkLabel(scene_frame, text=f"Scene {scene['id']}", font=("Arial", 14, "bold"), text_color="#ccc").grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=5)
-            
+
             ctk.CTkLabel(scene_frame, text="Narration:").grid(row=1, column=0, sticky="nw", padx=10, pady=5)
             narration_box = ctk.CTkTextbox(scene_frame, height=60, font=("Arial", 12))
             narration_box.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
             narration_box.insert("1.0", scene['text'])
-            
+
             ctk.CTkLabel(scene_frame, text="Visual Prompt:", text_color="#00E5FF").grid(row=2, column=0, sticky="nw", padx=10, pady=5)
             prompt_box = ctk.CTkTextbox(scene_frame, height=60, font=("Arial", 12, "bold"))
             prompt_box.grid(row=2, column=1, sticky="ew", padx=10, pady=5)
             prompt_box.insert("1.0", scene['prompt'])
-            
+
             self.scene_widgets.append({
                 "id": scene['id'],
                 "narration_box": narration_box,
                 "prompt_box": prompt_box
             })
-            
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=2, column=0, pady=10)
-        
+
         ctk.CTkButton(btn_frame, text="✅ Approve Prompts & Continue", fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", font=("Arial", 14, "bold"), command=self.approve_scenes).pack(side="left", padx=10)
-        
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-        
+
     def approve_scenes(self):
         import json, logging
         updated_scenes = []
@@ -192,14 +193,14 @@ class AgentStoryboardWindow(ctk.CTkToplevel):
                 "text": widget["narration_box"].get("1.0", "end-1c").strip(),
                 "prompt": widget["prompt_box"].get("1.0", "end-1c").strip()
             })
-        
+
         with open(self.file_path, "w", encoding="utf-8") as f:
             json.dump(updated_scenes, f, indent=4)
-            
+
         logging.info("Storyboard approved by user. Resuming pipeline...")
         self.resume_event.set()
         self.destroy()
-        
+
     def on_close(self):
         import logging
         logging.warning("Storyboard closed without approval. Proceeding with unedited prompts.")
@@ -247,18 +248,19 @@ class App(ctk.CTk):
         self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0, fg_color="#0A0A0E")
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_rowconfigure(6, weight=1)
-        
+
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="⚡ NULLPK V4", font=ctk.CTkFont(family="Consolas", size=22, weight="bold"), text_color="#00E5FF")
         self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 40))
-        
+
         self.sidebar_buttons = {}
-        for i, name in enumerate(["Main", "Agent Studio", "Settings", "Publish", "Tools", "History", "About"]):
-            btn = ctk.CTkButton(self.sidebar_frame, corner_radius=8, height=45, border_spacing=15, 
-                                text=f"■ {name}", font=ctk.CTkFont(family="Consolas", size=14, weight="bold"),
-                                fg_color="transparent", text_color="#8F8F99", 
+        sidebar_menu = ["Main", "Agent Studio", "Competitor Monitoring", "Auto Trend Pipeline", "Settings", "Publish", "Tools", "History", "About"]
+        for i, name in enumerate(sidebar_menu):
+            btn = ctk.CTkButton(self.sidebar_frame, corner_radius=8, height=36, border_spacing=10,
+                                text=f"■ {name}", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+                                fg_color="transparent", text_color="#8F8F99",
                                 hover_color="#181824", anchor="w",
                                 command=lambda n=name: self.select_frame_by_name(n))
-            btn.grid(row=i+1, column=0, sticky="ew", padx=10, pady=5)
+            btn.grid(row=i+1, column=0, sticky="ew", padx=10, pady=2)
             self.sidebar_buttons[name] = btn
 
         # Main Content Frame
@@ -270,6 +272,8 @@ class App(ctk.CTk):
         # Content frames instead of tabs
         self.main_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
         self.agent_studio_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
+        self.competitor_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
+        self.auto_trend_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
         self.settings_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
         self.publish_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
         self.tools_tab = ctk.CTkFrame(self.main_content_frame, fg_color="transparent")
@@ -279,6 +283,8 @@ class App(ctk.CTk):
         self.frames = {
             "Main": self.main_tab,
             "Agent Studio": self.agent_studio_tab,
+            "Competitor Monitoring": self.competitor_tab,
+            "Auto Trend Pipeline": self.auto_trend_tab,
             "Settings": self.settings_tab,
             "Publish": self.publish_tab,
             "Tools": self.tools_tab,
@@ -288,6 +294,8 @@ class App(ctk.CTk):
 
         self._create_main_tab_widgets()
         self._create_agent_studio_widgets()
+        self._create_competitor_tab_widgets()
+        self._create_auto_trend_tab_widgets()
         self._create_settings_tab_widgets()
         self._create_publish_tab_widgets()
         self._create_tools_tab_widgets()
@@ -299,7 +307,7 @@ class App(ctk.CTk):
         for btn_name, btn in self.sidebar_buttons.items():
             btn.configure(fg_color="#181824" if btn_name == name else "transparent",
                           text_color="#00E5FF" if btn_name == name else "#8F8F99")
-                
+
         for frame_name, frame in self.frames.items():
             if frame_name == name:
                 frame.grid(row=0, column=0, sticky="nsew")
@@ -309,28 +317,28 @@ class App(ctk.CTk):
     def _create_agent_studio_widgets(self):
         self.agent_studio_tab.columnconfigure(0, weight=1)
         self.agent_studio_tab.rowconfigure(3, weight=1)
-        
+
         # Header
         header_frame = ctk.CTkFrame(self.agent_studio_tab, fg_color="transparent")
         header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
-        
+
         ctk.CTkLabel(header_frame, text="AI Agent Studio", font=("Arial", 24, "bold"), text_color="#00E5FF").pack(side="left")
         ctk.CTkLabel(header_frame, text="Full Production House Workflow", font=("Arial", 14)).pack(side="left", padx=15, pady=5)
-        
+
         # Options Frame
         options_frame = ctk.CTkFrame(self.agent_studio_tab, fg_color="#181824", corner_radius=10)
         options_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
-        
+
         ctk.CTkLabel(options_frame, text="Director Style:").grid(row=0, column=0, padx=(15, 5), pady=10)
         self.agent_style_var = ctk.StringVar(value="Cinematic Documentary")
         self.agent_style_menu = ctk.CTkOptionMenu(options_frame, variable=self.agent_style_var, values=["Cinematic Documentary", "Cyberpunk / Neon", "TikTok Viral", "Horror / Dark", "Sci-Fi / Futuristic", "Neutral"])
         self.agent_style_menu.grid(row=0, column=1, padx=5, pady=10)
-        
+
         ctk.CTkLabel(options_frame, text="Aspect Ratio:").grid(row=0, column=2, padx=(15, 5), pady=10)
         self.agent_ratio_var = ctk.StringVar(value="16:9")
         self.agent_ratio_menu = ctk.CTkOptionMenu(options_frame, variable=self.agent_ratio_var, values=["16:9", "9:16", "1:1"])
         self.agent_ratio_menu.grid(row=0, column=3, padx=5, pady=10)
-        
+
         self.agent_captions_var = ctk.BooleanVar(value=True)
         self.agent_captions_check = ctk.CTkCheckBox(options_frame, text="Auto-Captions", variable=self.agent_captions_var)
         self.agent_captions_check.grid(row=0, column=4, padx=(20, 15), pady=10)
@@ -339,64 +347,246 @@ class App(ctk.CTk):
         input_frame = ctk.CTkFrame(self.agent_studio_tab, fg_color="#181824", corner_radius=10)
         input_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 10))
         input_frame.columnconfigure(1, weight=1)
-        
+
         ctk.CTkLabel(input_frame, text="Video Topic:").grid(row=0, column=0, padx=15, pady=15, sticky="w")
         self.agent_topic_entry = ctk.CTkEntry(input_frame, placeholder_text="Enter the topic for your AI generated video...", height=40)
         self.agent_topic_entry.grid(row=0, column=1, padx=10, pady=15, sticky="ew")
-        
+
         self.btn_start_agents = ctk.CTkButton(input_frame, text="🚀 START PRODUCTION", font=("Arial", 14, "bold"), height=40, fg_color="#00E5FF", text_color="black", hover_color="#00B3CC", command=self.start_agent_pipeline)
         self.btn_start_agents.grid(row=0, column=2, padx=15, pady=15)
-        
+
         # Node Canvas View
         self.agent_canvas_frame = ctk.CTkFrame(self.agent_studio_tab, fg_color="#0A0A0E", corner_radius=15, border_width=1, border_color="#333")
         self.agent_canvas_frame.grid(row=3, column=0, sticky="nsew", padx=20, pady=10)
         self.agent_canvas_frame.rowconfigure(0, weight=1)
         self.agent_canvas_frame.columnconfigure(0, weight=1)
-        
+
         # Create the nodes
         self.nodes_container = ctk.CTkFrame(self.agent_canvas_frame, fg_color="transparent")
         self.nodes_container.place(relx=0.5, rely=0.3, anchor="center")
-        
+
         self.agent_nodes = {}
-        
+
         node_names = ["Writer Agent", "Director Agent", "Image Gen Agent", "Video Gen Agent", "Editor Agent"]
         for i, name in enumerate(node_names):
             node_frame = ctk.CTkFrame(self.nodes_container, width=160, height=80, corner_radius=10, fg_color="#1E1E2E", border_width=2, border_color="#444")
             node_frame.grid_propagate(False)
             node_frame.grid(row=0, column=i*2, padx=10, pady=20)
-            
+
             lbl_name = ctk.CTkLabel(node_frame, text=name, font=("Arial", 12, "bold"), text_color="#ccc")
             lbl_name.place(relx=0.5, rely=0.3, anchor="center")
-            
+
             lbl_status = ctk.CTkLabel(node_frame, text="Idle", font=("Arial", 10), text_color="#777")
             lbl_status.place(relx=0.5, rely=0.7, anchor="center")
-            
+
             self.agent_nodes[name] = {"frame": node_frame, "name_lbl": lbl_name, "status_lbl": lbl_status}
-            
+
             if i < len(node_names) - 1:
                 arrow = ctk.CTkLabel(self.nodes_container, text="➔", font=("Arial", 24, "bold"), text_color="#444")
                 arrow.grid(row=0, column=i*2 + 1, padx=5)
-                
+
         # Agent Logs
         log_frame = ctk.CTkFrame(self.agent_studio_tab, fg_color="#181824", corner_radius=10)
         log_frame.grid(row=4, column=0, sticky="ew", padx=20, pady=(10, 20))
         log_frame.columnconfigure(0, weight=1)
-        
+
         ctk.CTkLabel(log_frame, text="Terminal Logs", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
         self.agent_log_textbox = ctk.CTkTextbox(log_frame, height=150, font=("Consolas", 11), state="disabled", fg_color="#0A0A0E", text_color="#00FF00")
         self.agent_log_textbox.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+
+    def _create_competitor_tab_widgets(self):
+        self.competitor_tab.columnconfigure(0, weight=1)
+        self.competitor_tab.rowconfigure(2, weight=1)
+
+        # Header
+        header_frame = ctk.CTkFrame(self.competitor_tab, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
+        ctk.CTkLabel(header_frame, text="👁️ Competitor Channel Monitoring", font=("Arial", 22, "bold"), text_color="#00E5FF").pack(side="left")
+
+        # Inputs Frame
+        inputs_frame = ctk.CTkFrame(self.competitor_tab, fg_color="#181824", corner_radius=10)
+        inputs_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
+        inputs_frame.columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(inputs_frame, text="Competitor URLs/IDs (comma-separated):", font=("Arial", 12, "bold")).grid(row=0, column=0, padx=15, pady=12, sticky="w")
+        self.competitor_urls_entry = ctk.CTkEntry(inputs_frame, placeholder_text="e.g., @TechLead, UC_x5XG1OV2P6uZZ5FSM9Ttw, https://youtube.com/@mkbhd", height=38)
+        self.competitor_urls_entry.grid(row=0, column=1, padx=10, pady=12, sticky="ew")
+
+        self.btn_analyze_competitors = ctk.CTkButton(inputs_frame, text="🔍 Analyze & Propose Topics", font=("Arial", 13, "bold"), height=38, fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", command=self.start_competitor_analysis)
+        self.btn_analyze_competitors.grid(row=0, column=2, padx=15, pady=12)
+
+        # Results & Proposal Box
+        results_frame = ctk.CTkFrame(self.competitor_tab, fg_color="#181824", corner_radius=10)
+        results_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=10)
+        results_frame.rowconfigure(1, weight=1)
+        results_frame.columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(results_frame, text="Suggested Trending Topics (HITL Approval Required)", font=("Arial", 14, "bold"), text_color="#00E5FF").grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
+
+        self.competitor_scroll_frame = ctk.CTkScrollableFrame(results_frame, fg_color="#0A0A0E")
+        self.competitor_scroll_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=10)
+        self.competitor_scroll_frame.columnconfigure(0, weight=1)
+
+    def start_competitor_analysis(self):
+        urls_str = self.competitor_urls_entry.get().strip()
+        if not urls_str:
+            messagebox.showerror("Error", "Please enter at least one competitor YouTube channel URL or ID.")
+            return
+
+        self.btn_analyze_competitors.configure(state="disabled", text="Analyzing...")
+        for child in self.competitor_scroll_frame.winfo_children():
+            child.destroy()
+
+        ctk.CTkLabel(self.competitor_scroll_frame, text="⏳ Tracking competitor channels & generating AI proposals... Please wait.", font=("Arial", 13)).pack(pady=20)
+
+        threading.Thread(target=self._competitor_analysis_worker, args=(urls_str,), daemon=True).start()
+
+    def _competitor_analysis_worker(self, urls_str):
+        try:
+            channel_list = [u.strip() for u in urls_str.split(",") if u.strip()]
+            tracker = CompetitorTracker(self.config.get("YOUTUBE_API_KEY"))
+            summary = tracker.get_competitor_summary(channel_list)
+
+            google_client = GoogleClient(self.config)
+            proposals = google_client.analyze_competitors_and_trends(summary, niche="US Tech & General Video Audience")
+
+            self.after(0, lambda: self._display_competitor_proposals(proposals))
+        except Exception as e:
+            logging.error(f"Competitor analysis failed: {e}", exc_info=True)
+            self.after(0, lambda e=e: messagebox.showerror("Analysis Error", f"Failed to analyze competitors:\n{e}"))
+        finally:
+            self.after(0, lambda: self.btn_analyze_competitors.configure(state="normal", text="🔍 Analyze & Propose Topics"))
+
+    def _display_competitor_proposals(self, proposals):
+        for child in self.competitor_scroll_frame.winfo_children():
+            child.destroy()
+
+        if not proposals:
+            ctk.CTkLabel(self.competitor_scroll_frame, text="No topics were generated.").pack(pady=20)
+            return
+
+        for i, prop in enumerate(proposals):
+            p_frame = ctk.CTkFrame(self.competitor_scroll_frame, fg_color="#1E1E2E", corner_radius=8, border_width=1, border_color="#333")
+            p_frame.pack(fill="x", padx=10, pady=8)
+            p_frame.columnconfigure(0, weight=1)
+
+            topic = prop.get("topic", "Trending Topic")
+            title = prop.get("title", "")
+            angle = prop.get("angle", "")
+            hook = prop.get("hook", "")
+
+            title_text = f"💡 Proposal #{i+1}: {topic}"
+            ctk.CTkLabel(p_frame, text=title_text, font=("Arial", 14, "bold"), text_color="#00E5FF").grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+            ctk.CTkLabel(p_frame, text=f"Title Idea: {title}", font=("Arial", 12, "bold"), text_color="#FFFFFF").grid(row=1, column=0, sticky="w", padx=12, pady=2)
+            ctk.CTkLabel(p_frame, text=f"Strategic Angle: {angle}", font=("Arial", 11), text_color="#AAA", wraplength=600).grid(row=2, column=0, sticky="w", padx=12, pady=2)
+            ctk.CTkLabel(p_frame, text=f"Opening Hook: \"{hook}\"", font=("Arial", 11, "italic"), text_color="#FFD700", wraplength=600).grid(row=3, column=0, sticky="w", padx=12, pady=(2, 10))
+
+            btn = ctk.CTkButton(p_frame, text="✅ Approve & Send to Video Generator", font=("Arial", 12, "bold"), fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", command=lambda t=topic: self.approve_and_run_topic(t))
+            btn.grid(row=0, column=1, rowspan=4, padx=15, pady=10)
+
+    def approve_and_run_topic(self, topic):
+        """HITL approval callback: sets topic in main tab and switches to main tab for video pipeline execution."""
+        self.topic_entry.delete(0, "end")
+        self.topic_entry.insert(0, topic)
+        self.select_frame_by_name("Main")
+        messagebox.showinfo("Topic Approved", f"Topic '{topic}' has been approved and loaded into the main pipeline!\nClick '⚡ INITIALIZE SEQUENCE' to create the video.")
+
+    def _create_auto_trend_tab_widgets(self):
+        self.auto_trend_tab.columnconfigure(0, weight=1)
+        self.auto_trend_tab.rowconfigure(2, weight=1)
+
+        header_frame = ctk.CTkFrame(self.auto_trend_tab, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
+        ctk.CTkLabel(header_frame, text="🚀 Auto Trend Pipeline (US Market)", font=("Arial", 22, "bold"), text_color="#00E5FF").pack(side="left")
+
+        inputs_frame = ctk.CTkFrame(self.auto_trend_tab, fg_color="#181824", corner_radius=10)
+        inputs_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
+        inputs_frame.columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(inputs_frame, text="Target Channel Niche / Keyword:", font=("Arial", 12, "bold")).grid(row=0, column=0, padx=15, pady=12, sticky="w")
+        self.trend_niche_entry = ctk.CTkEntry(inputs_frame, placeholder_text="e.g., AI Technology, Python Coding, Space Exploration", height=38)
+        self.trend_niche_entry.grid(row=0, column=1, padx=10, pady=12, sticky="ew")
+
+        self.btn_scan_trends = ctk.CTkButton(inputs_frame, text="📡 Scan Viral US Trends", font=("Arial", 13, "bold"), height=38, fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", command=self.start_trend_scan)
+        self.btn_scan_trends.grid(row=0, column=2, padx=15, pady=12)
+
+        results_frame = ctk.CTkFrame(self.auto_trend_tab, fg_color="#181824", corner_radius=10)
+        results_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=10)
+        results_frame.rowconfigure(1, weight=1)
+        results_frame.columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(results_frame, text="Discovered US Market Trends (Review & Approve Quality)", font=("Arial", 14, "bold"), text_color="#00E5FF").grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
+
+        self.auto_trend_scroll_frame = ctk.CTkScrollableFrame(results_frame, fg_color="#0A0A0E")
+        self.auto_trend_scroll_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=10)
+        self.auto_trend_scroll_frame.columnconfigure(0, weight=1)
+
+    def start_trend_scan(self):
+        niche = self.trend_niche_entry.get().strip() or "General Technology & Trending Topics"
+        self.btn_scan_trends.configure(state="disabled", text="Scanning...")
+
+        for child in self.auto_trend_scroll_frame.winfo_children():
+            child.destroy()
+
+        ctk.CTkLabel(self.auto_trend_scroll_frame, text=f"📡 Scanning live internet news and US trends for niche '{niche}'...", font=("Arial", 13)).pack(pady=20)
+
+        threading.Thread(target=self._trend_scan_worker, args=(niche,), daemon=True).start()
+
+    def _trend_scan_worker(self, niche):
+        try:
+            news_client = NewsApiClient(self.config.get("NEWS_API_KEY"))
+            google_client = GoogleClient(self.config)
+
+            news_summary = news_client.get_news(niche)
+            if not news_summary:
+                news_summary = f"Trending news and search interest around {niche} in the United States."
+
+            proposals = google_client.analyze_competitors_and_trends(news_summary, niche=f"US Audience - {niche}")
+
+            self.after(0, lambda: self._display_trend_proposals(proposals))
+        except Exception as e:
+            logging.error(f"Trend scan failed: {e}", exc_info=True)
+            self.after(0, lambda e=e: messagebox.showerror("Trend Scan Error", f"Failed to scan trends:\n{e}"))
+        finally:
+            self.after(0, lambda: self.btn_scan_trends.configure(state="normal", text="📡 Scan Viral US Trends"))
+
+    def _display_trend_proposals(self, proposals):
+        for child in self.auto_trend_scroll_frame.winfo_children():
+            child.destroy()
+
+        if not proposals:
+            ctk.CTkLabel(self.auto_trend_scroll_frame, text="No trend topics found.").pack(pady=20)
+            return
+
+        for i, prop in enumerate(proposals):
+            p_frame = ctk.CTkFrame(self.auto_trend_scroll_frame, fg_color="#1E1E2E", corner_radius=8, border_width=1, border_color="#333")
+            p_frame.pack(fill="x", padx=10, pady=8)
+            p_frame.columnconfigure(0, weight=1)
+
+            topic = prop.get("topic", "Trending Topic")
+            title = prop.get("title", "")
+            angle = prop.get("angle", "")
+            hook = prop.get("hook", "")
+
+            ctk.CTkLabel(p_frame, text=f"🔥 Trend #{i+1}: {topic}", font=("Arial", 14, "bold"), text_color="#00E5FF").grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
+            ctk.CTkLabel(p_frame, text=f"Title Concept: {title}", font=("Arial", 12, "bold"), text_color="#FFFFFF").grid(row=1, column=0, sticky="w", padx=12, pady=2)
+            ctk.CTkLabel(p_frame, text=f"Market Potential: {angle}", font=("Arial", 11), text_color="#AAA", wraplength=600).grid(row=2, column=0, sticky="w", padx=12, pady=2)
+            ctk.CTkLabel(p_frame, text=f"Hook: \"{hook}\"", font=("Arial", 11, "italic"), text_color="#FFD700", wraplength=600).grid(row=3, column=0, sticky="w", padx=12, pady=(2, 10))
+
+            btn = ctk.CTkButton(p_frame, text="✅ Approve & Generate Video", font=("Arial", 12, "bold"), fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", command=lambda t=topic: self.approve_and_run_topic(t))
+            btn.grid(row=0, column=1, rowspan=4, padx=15, pady=10)
 
     def log_to_agent_console(self, msg):
         self.agent_log_textbox.configure(state="normal")
         self.agent_log_textbox.insert("end", f"> {msg}\n")
         self.agent_log_textbox.see("end")
         self.agent_log_textbox.configure(state="disabled")
-        
+
     def update_agent_node(self, node_name, status_text, state="idle"):
         if node_name not in self.agent_nodes: return
         node = self.agent_nodes[node_name]
         node["status_lbl"].configure(text=status_text)
-        
+
         if state == "idle":
             node["frame"].configure(border_color="#444")
             node["name_lbl"].configure(text_color="#ccc")
@@ -419,22 +609,22 @@ class App(ctk.CTk):
         if not topic:
             messagebox.showerror("Error", "Please enter a topic.")
             return
-            
+
         self.btn_start_agents.configure(state="disabled", text="Running...")
         self.agent_log_textbox.configure(state="normal")
         self.agent_log_textbox.delete("1.0", "end")
         self.agent_log_textbox.configure(state="disabled")
-        
+
         # Reset nodes
         for node in self.agent_nodes:
             self.update_agent_node(node, "Idle", "idle")
-            
+
         settings = {
             "director_style": self.agent_style_var.get(),
             "aspect_ratio": self.agent_ratio_var.get(),
             "auto_captions": self.agent_captions_var.get()
         }
-            
+
         threading.Thread(target=self._run_agent_pipeline_thread, args=(topic, settings), daemon=True).start()
 
     def _run_agent_pipeline_thread(self, topic, settings):
@@ -477,14 +667,14 @@ class App(ctk.CTk):
         ctk.CTkLabel(controls_frame, text="Video Aspect Ratio:", font=("Arial", 12)).pack(pady=(10, 5))
         self.main_aspect_ratio_combo = ctk.CTkComboBox(controls_frame, values=["16:9 (Horizontal)", "9:16 (Vertical)", "1:1 (Square)"], width=300)
         self.main_aspect_ratio_combo.pack(pady=5)
-        
+
         checkbox_frame = ctk.CTkFrame(controls_frame, fg_color="transparent")
         checkbox_frame.pack(pady=20, padx=20, fill="x")
-        
+
         self.fact_check_var = ctk.BooleanVar()
         self.fact_check_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Enable Fact-Checking", variable=self.fact_check_var)
         self.fact_check_checkbox.pack(anchor="w", pady=4)
-        
+
         self.metadata_var = ctk.BooleanVar()
         self.metadata_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Generate SEO Metadata", variable=self.metadata_var)
         self.metadata_checkbox.pack(anchor="w", pady=4)
@@ -492,19 +682,19 @@ class App(ctk.CTk):
         self.timestamps_var = ctk.BooleanVar()
         self.timestamps_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Generate Timestamps", variable=self.timestamps_var)
         self.timestamps_checkbox.pack(anchor="w", pady=4)
-        
+
         self.caption_var = ctk.BooleanVar()
         self.caption_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Enable Auto-Captioning", variable=self.caption_var)
         self.caption_checkbox.pack(anchor="w", pady=4)
-        
+
         self.add_music_var = ctk.BooleanVar()
         self.add_music_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Add Background Music", variable=self.add_music_var)
         self.add_music_checkbox.pack(anchor="w", pady=4)
-        
+
         self.generate_snippets_var = ctk.BooleanVar()
         self.snippets_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Generate Social Media Snippets", variable=self.generate_snippets_var)
         self.snippets_checkbox.pack(anchor="w", pady=4)
-        
+
         self.generate_thumbnail_var = ctk.BooleanVar()
         self.thumbnail_checkbox = ctk.CTkCheckBox(checkbox_frame, text="Generate Thumbnail", variable=self.generate_thumbnail_var)
         self.thumbnail_checkbox.pack(anchor="w", pady=4)
@@ -546,7 +736,7 @@ class App(ctk.CTk):
         self.run_button.pack(pady=20, ipady=5, fill="x", padx=40)
         self.stop_button = ctk.CTkButton(controls_frame, text="🛑 ABORT PROTOCOL", command=self.stop_pipeline, font=ctk.CTkFont(family="Consolas", size=16, weight="bold"), fg_color="#FF0044", text_color="#FFFFFF", hover_color="#CC0036", state="disabled", corner_radius=6)
         self.stop_button.pack(pady=10, ipady=5, fill="x", padx=40)
-        
+
         log_frame = ctk.CTkFrame(self.main_tab)
         log_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
         log_frame.rowconfigure(len(PIPELINE_STEPS) + 1, weight=1)
@@ -572,13 +762,13 @@ class App(ctk.CTk):
         api_tab.columnconfigure(1, weight=1)
         ctk.CTkLabel(api_tab, text="Video Engine").grid(row=0, column=0, sticky="w", padx=10, pady=8)
         self.video_engine_combo = ctk.CTkComboBox(api_tab, values=["WaveSpeed AI", "Vertex AI (Veo)"], width=300); self.video_engine_combo.grid(row=0, column=1, columnspan=2, sticky="w", padx=10)
-        
+
         ctk.CTkLabel(api_tab, text="Image Engine").grid(row=1, column=0, sticky="w", padx=10, pady=8)
         self.image_engine_combo = ctk.CTkComboBox(api_tab, values=["Gemini API", "WaveSpeed AI"], width=300); self.image_engine_combo.grid(row=1, column=1, columnspan=2, sticky="w", padx=10)
-        
+
         ctk.CTkLabel(api_tab, text="Audio Engine").grid(row=2, column=0, sticky="w", padx=10, pady=8)
         self.audio_engine_combo = ctk.CTkComboBox(api_tab, values=["Gemini API", "WaveSpeed AI"], width=300); self.audio_engine_combo.grid(row=2, column=1, columnspan=2, sticky="w", padx=10)
-        
+
         ctk.CTkLabel(api_tab, text="WaveSpeed Video Model").grid(row=3, column=0, sticky="w", padx=10, pady=8)
         self.ws_video_model_combo = ctk.CTkComboBox(api_tab, values=[
             "wavespeed-ai/ltx-2.3-text-to-video",
@@ -598,16 +788,16 @@ class App(ctk.CTk):
         ctk.CTkLabel(api_tab, text="Gemini API Key").grid(row=6, column=0, sticky="w", padx=10, pady=8)
         self.gemini_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.gemini_key_entry.grid(row=6, column=1, padx=10, sticky="ew")
         ctk.CTkButton(api_tab, text="🛜 Check Connection", command=self.check_api_connection).grid(row=6, column=2, padx=10, sticky="w")
-        
+
         ctk.CTkLabel(api_tab, text="WaveSpeed AI Key").grid(row=7, column=0, sticky="w", padx=10, pady=8)
         self.wavespeed_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.wavespeed_key_entry.grid(row=7, column=1, columnspan=2, padx=10, sticky="ew")
-        
+
         ctk.CTkLabel(api_tab, text="News API Key").grid(row=8, column=0, sticky="w", padx=10, pady=8)
         self.news_api_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.news_api_key_entry.grid(row=8, column=1, columnspan=2, padx=10, sticky="ew")
 
         ctk.CTkLabel(api_tab, text="Text Engine").grid(row=9, column=0, sticky="w", padx=10, pady=8)
         self.text_engine_combo = ctk.CTkComboBox(api_tab, values=["Gemini API", "WaveSpeed AI", "Ollama"], width=300); self.text_engine_combo.grid(row=9, column=1, columnspan=2, sticky="w", padx=10)
-        
+
         ctk.CTkLabel(api_tab, text="WaveSpeed Text Model").grid(row=10, column=0, sticky="w", padx=10, pady=8)
         self.ws_text_model_combo = ctk.CTkComboBox(api_tab, values=[
             "meta-llama/llama-3.3-70b-instruct",
@@ -616,10 +806,10 @@ class App(ctk.CTk):
             "google/gemini-2.0-flash",
             "mistralai/mistral-large",
         ], width=300); self.ws_text_model_combo.grid(row=10, column=1, columnspan=2, sticky="w", padx=10)
-        
+
         ctk.CTkLabel(api_tab, text="Ollama Base URL").grid(row=11, column=0, sticky="w", padx=10, pady=8)
         self.ollama_base_url_entry = ctk.CTkEntry(api_tab, width=400); self.ollama_base_url_entry.grid(row=11, column=1, columnspan=2, padx=10, sticky="ew")
-        
+
         ctk.CTkLabel(api_tab, text="Ollama Model").grid(row=12, column=0, sticky="w", padx=10, pady=8)
         self.ollama_model_entry = ctk.CTkEntry(api_tab, width=400); self.ollama_model_entry.grid(row=12, column=1, columnspan=2, padx=10, sticky="ew")
 
@@ -667,7 +857,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(advanced_tab, text="Video Aspect Ratio").grid(row=14, column=0, sticky="w", padx=10, pady=5)
         self.aspect_ratio_combo = ctk.CTkComboBox(advanced_tab, values=["16:9 (Horizontal)", "9:16 (Vertical)"], width=300); self.aspect_ratio_combo.grid(row=14, column=1, padx=10, sticky="w")
         ctk.CTkButton(self.settings_tab, text="💾 Save Settings", command=self.save_settings_from_gui).pack(pady=20)
-    
+
     def _create_publish_tab_widgets(self):
         self.publish_tab.columnconfigure(1, weight=1)
         metadata_frame = ctk.CTkFrame(self.publish_tab, fg_color="transparent")
@@ -680,17 +870,17 @@ class App(ctk.CTk):
         self.video_desc_entry = ctk.CTkTextbox(self.publish_tab, height=120); self.video_desc_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=10, pady=5)
         ctk.CTkLabel(self.publish_tab, text="Tags:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
         self.video_tags_entry = ctk.CTkEntry(self.publish_tab, placeholder_text="tag1, tag2, tag3"); self.video_tags_entry.grid(row=3, column=1, columnspan=2, sticky="ew", padx=10, pady=5)
-        
+
         ctk.CTkLabel(self.publish_tab, text="--- Upload ---", font=("Arial", 16, "bold")).grid(row=4, column=0, columnspan=3, pady=(20,5), padx=10, sticky="w")
-        
+
         ctk.CTkLabel(self.publish_tab, text="Video File:").grid(row=5, column=0, sticky="w", padx=10, pady=5)
         self.video_path_entry = ctk.CTkEntry(self.publish_tab, placeholder_text="Leave blank to use generated video"); self.video_path_entry.grid(row=5, column=1, sticky="ew", padx=10, pady=5)
         ctk.CTkButton(self.publish_tab, text="📂 Browse...", command=lambda: self.browse_file(self.video_path_entry)).grid(row=5, column=2, sticky="w", padx=10, pady=5)
-        
+
         ctk.CTkLabel(self.publish_tab, text="Thumbnail:").grid(row=6, column=0, sticky="w", padx=10, pady=5)
         self.thumbnail_path_entry = ctk.CTkEntry(self.publish_tab, placeholder_text="Leave blank to use generated thumbnail"); self.thumbnail_path_entry.grid(row=6, column=1, sticky="ew", padx=10, pady=5)
         ctk.CTkButton(self.publish_tab, text="📂 Browse...", command=lambda: self.browse_file(self.thumbnail_path_entry)).grid(row=6, column=2, sticky="w", padx=10, pady=5)
-        
+
         self.upload_status_label = ctk.CTkLabel(self.publish_tab, text="", font=("Arial", 12))
         self.upload_status_label.grid(row=7, column=0, columnspan=3, pady=(10,0), padx=20, sticky="ew")
         self.upload_progress_bar = ctk.CTkProgressBar(self.publish_tab, orientation="horizontal")
@@ -703,74 +893,74 @@ class App(ctk.CTk):
         self.youtube_upload_button.pack(side="left", padx=10)
         self.facebook_upload_button = ctk.CTkButton(upload_frame, text="🔵 Upload to Facebook", command=lambda: self.upload_facebook(), fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC")
         self.facebook_upload_button.pack(side="left", padx=10)
-        
+
         ctk.CTkLabel(self.publish_tab, text="--- API Credentials for Publishing ---", font=("Arial", 12, "bold")).grid(row=10, column=0, columnspan=3, pady=(20,5), padx=10, sticky="w")
         ctk.CTkLabel(self.publish_tab, text="Facebook Access Token:").grid(row=11, column=0, sticky="w", padx=10, pady=5)
         self.facebook_token_entry = ctk.CTkEntry(self.publish_tab, width=400, show="*", placeholder_text="User/Page access token"); self.facebook_token_entry.grid(row=11, column=1, columnspan=2, sticky="ew", padx=10, pady=5)
-    
+
     def _create_tools_tab_widgets(self):
         self.tools_tab.columnconfigure(1, weight=1)
         ctk.CTkLabel(self.tools_tab, text="Auto-Caption Video Tool", font=("Arial", 20, "bold")).grid(row=0, column=0, columnspan=3, pady=(20, 10), padx=20, sticky="w")
-        
+
         # File selection frame
         file_frame = ctk.CTkFrame(self.tools_tab, fg_color="transparent")
         file_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
         file_frame.columnconfigure(1, weight=1)
-        
+
         ctk.CTkLabel(file_frame, text="Input Video:").grid(row=0, column=0, sticky="w", padx=10, pady=5)
         self.tools_input_video = ctk.CTkEntry(file_frame, placeholder_text="Path to original video")
         self.tools_input_video.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
         ctk.CTkButton(file_frame, text="📂 Browse...", command=lambda: self.browse_file(self.tools_input_video)).grid(row=0, column=2, sticky="w", padx=10, pady=5)
-        
+
         ctk.CTkLabel(file_frame, text="Output Video:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
         self.tools_output_video = ctk.CTkEntry(file_frame, placeholder_text="Where to save captioned video")
         self.tools_output_video.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
         ctk.CTkButton(file_frame, text="📂 Save As...", command=lambda: self.browse_save_file(self.tools_output_video)).grid(row=1, column=2, sticky="w", padx=10, pady=5)
-        
+
         ctk.CTkLabel(file_frame, text="Spoken Language:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
         self.tools_language_combo = ctk.CTkComboBox(file_frame, values=["English", "Spanish", "French", "German", "Urdu", "Auto"], width=200)
         self.tools_language_combo.grid(row=2, column=1, sticky="w", padx=10, pady=5)
         self.tools_language_combo.set("English")
-        
+
         # Style section
         style_frame = ctk.CTkFrame(self.tools_tab)
         style_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
         style_frame.columnconfigure(1, weight=1)
-        
+
         ctk.CTkLabel(style_frame, text="Caption Styling", font=("Arial", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=5)
-        
+
         ctk.CTkLabel(style_frame, text="Template:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
         self.style_template_combo = ctk.CTkComboBox(style_frame, values=["Default Yellow", "Cinematic White", "TikTok Bold"], command=self.update_live_preview)
         self.style_template_combo.grid(row=1, column=1, sticky="w", padx=10, pady=5)
         self.style_template_combo.set("Default Yellow")
-        
+
         ctk.CTkLabel(style_frame, text="Font Family:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
         self.style_font_combo = ctk.CTkComboBox(style_frame, values=["Arial Black", "Impact", "Consolas", "Verdana"], command=self.update_live_preview)
         self.style_font_combo.grid(row=2, column=1, sticky="w", padx=10, pady=5)
         self.style_font_combo.set("Arial Black")
-        
+
         ctk.CTkLabel(style_frame, text="Font Size:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
         self.style_size_slider = ctk.CTkSlider(style_frame, from_=20, to=100, number_of_steps=80, command=self.update_live_preview)
         self.style_size_slider.grid(row=3, column=1, sticky="ew", padx=10, pady=5)
         self.style_size_slider.set(46)
-        
+
         # Live Preview
         self.live_preview_label = ctk.CTkLabel(style_frame, text="LIVE PREVIEW", width=300, height=80, corner_radius=10, fg_color="#333333")
         self.live_preview_label.grid(row=1, column=2, rowspan=3, sticky="nsew", padx=20, pady=10)
-        
+
         # Buttons
         btn_frame = ctk.CTkFrame(self.tools_tab, fg_color="transparent")
         btn_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
-        
+
         ctk.CTkButton(btn_frame, text="👁️ Show Video Preview", font=("Arial", 14), fg_color="#444444", hover_color="#cccccc", command=self.show_video_preview).grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         self.tools_caption_btn = ctk.CTkButton(btn_frame, text="🎙️ Generate Captions & Burn", font=("Arial", 14, "bold"), fg_color="#00E5FF", text_color="#0A0A0A", hover_color="#00B3CC", command=self.start_auto_caption_thread)
         self.tools_caption_btn.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
-        
+
         self.tools_status_label = ctk.CTkLabel(self.tools_tab, text="Ready", font=("Arial", 12))
         self.tools_status_label.grid(row=4, column=0, columnspan=3, pady=10, padx=20, sticky="ew")
-        
+
         self.update_live_preview(None)
 
     def get_current_style_opts(self):
@@ -778,14 +968,14 @@ class App(ctk.CTk):
         template = self.style_template_combo.get()
         size = int(self.style_size_slider.get())
         font = self.style_font_combo.get()
-        
+
         opts = {
             "fontname": font,
             "fontsize": size,
             "alignment": 2,
             "marginv": 40
         }
-        
+
         if template == "Default Yellow":
             opts.update({
                 "primarycolor": pysubs2.Color(255, 255, 0, 0),
@@ -819,9 +1009,9 @@ class App(ctk.CTk):
     def update_live_preview(self, _):
         template = self.style_template_combo.get()
         size = int(self.style_size_slider.get())
-        ui_size = max(12, int(size * 0.5)) 
+        ui_size = max(12, int(size * 0.5))
         font = self.style_font_combo.get()
-        
+
         if template == "Default Yellow":
             self.live_preview_label.configure(text_color="yellow", font=(font, ui_size, "bold"))
         elif template == "Cinematic White":
@@ -834,7 +1024,7 @@ class App(ctk.CTk):
         if not os.path.exists(in_vid):
             messagebox.showerror("Error", "Please select a valid input video first.")
             return
-        
+
         self.tools_status_label.configure(text="⏳ Generating Video Preview...")
         threading.Thread(target=self._video_preview_worker, args=(in_vid,), daemon=True).start()
 
@@ -845,7 +1035,7 @@ class App(ctk.CTk):
             temp_ass = "temp_preview.ass"
             subs = pysubs2.SSAFile()
             opts = self.get_current_style_opts()
-            
+
             style = pysubs2.SSAStyle(
                 fontname=opts.get("fontname"),
                 fontsize=opts.get("fontsize"),
@@ -861,7 +1051,7 @@ class App(ctk.CTk):
             subs.styles["Default"] = style
             subs.append(pysubs2.SSAEvent(start=0, end=5000, text="PREVIEW", style="Default"))
             subs.save(temp_ass)
-            
+
             out_img = "temp_preview.jpg"
             subs_path = os.path.abspath(temp_ass).replace('\\', '/').replace(':', '\\:')
             cmd = [
@@ -870,27 +1060,27 @@ class App(ctk.CTk):
                 "-vframes", "1", "-q:v", "2", out_img
             ]
             subprocess.run(cmd, check=True, capture_output=True)
-            
+
             self.after(0, self._show_preview_image, out_img)
             self.after(0, lambda: self.tools_status_label.configure(text="✅ Preview generated!"))
         except Exception as e:
             logging.error(f"Preview failed: {e}", exc_info=True)
             self.after(0, lambda e=e: messagebox.showerror("Preview Error", f"Failed to generate preview:\n{e}"))
             self.after(0, lambda: self.tools_status_label.configure(text="❌ Preview failed."))
-            
+
     def _show_preview_image(self, img_path):
         from PIL import Image
         if not os.path.exists(img_path): return
-        
+
         preview_win = ctk.CTkToplevel(self)
         preview_win.title("Video Frame Preview")
         preview_win.geometry("800x600")
         preview_win.attributes("-topmost", True)
-        
+
         img = Image.open(img_path)
         img.thumbnail((800, 600), Image.Resampling.LANCZOS)
         ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-        
+
         lbl = ctk.CTkLabel(preview_win, image=ctk_img, text="")
         lbl.pack(expand=True, fill="both", padx=10, pady=10)
 
@@ -899,52 +1089,52 @@ class App(ctk.CTk):
         if filename:
             entry_widget.delete(0, ctk.END)
             entry_widget.insert(0, filename)
-            
+
     def start_auto_caption_thread(self):
         in_vid = self.tools_input_video.get().strip()
         out_vid = self.tools_output_video.get().strip()
         lang = self.tools_language_combo.get().strip()
-        
+
         if not os.path.exists(in_vid):
             messagebox.showerror("Error", "Input video file does not exist.")
             return
         if not out_vid:
             messagebox.showerror("Error", "Please specify an output video path.")
             return
-            
+
         self.tools_caption_btn.configure(state="disabled")
         self.tools_status_label.configure(text="⏳ Extracting audio from video...")
-        
+
         # Pass the current style_opts to the thread
         style_opts = self.get_current_style_opts()
         threading.Thread(target=self.auto_caption_worker, args=(in_vid, out_vid, lang, style_opts), daemon=True).start()
-        
+
     def auto_caption_worker(self, in_vid, out_vid, lang, style_opts):
         import subprocess
         from pipeline import generate_captions
-        
+
         try:
             # 1. Extract Audio
             temp_audio = "temp_tools_audio.wav"
             temp_ass = "temp_tools_captions.ass"
-            
+
             if os.path.exists(temp_audio): os.remove(temp_audio)
             if os.path.exists(temp_ass): os.remove(temp_ass)
-            
+
             subprocess.run(["ffmpeg", "-y", "-i", in_vid, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", temp_audio], check=True, capture_output=True)
-            
+
             # 2. Transcribe
             self.after(0, lambda: self.tools_status_label.configure(text="⏳ Transcribing audio with Whisper..."))
             whisper_lang = None if lang == "Auto" else lang
             generate_captions(temp_audio, temp_ass, whisper_lang, style_opts=style_opts)
-            
+
             if not os.path.exists(temp_ass):
                 raise Exception("Failed to generate .ass subtitle file.")
-                
+
             # 3. Burn Subtitles
             self.after(0, lambda: self.tools_status_label.configure(text="⏳ Burning subtitles into video (This may take a while)..."))
             subs_path = os.path.abspath(temp_ass).replace('\\', '/').replace(':', '\\:')
-            
+
             cmd = [
                 "ffmpeg", "-y",
                 "-i", in_vid,
@@ -954,10 +1144,10 @@ class App(ctk.CTk):
                 out_vid
             ]
             subprocess.run(cmd, check=True, capture_output=True)
-            
+
             self.after(0, lambda: self.tools_status_label.configure(text="✅ Captions successfully burned to video!"))
             self.after(0, lambda: messagebox.showinfo("Success", f"Video saved to:\n{out_vid}"))
-            
+
         except Exception as e:
             logging.error(f"Auto-caption failed: {e}", exc_info=True)
             self.after(0, lambda e=e: self.tools_status_label.configure(text=f"❌ Error: {e}"))
@@ -973,7 +1163,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.about_tab, text="Author: Naqash Afzal", font=("Arial", 12)).pack(pady=5)
         ctk.CTkLabel(self.about_tab, text="This tool automates the creation of YouTube videos using AI.", wraplength=500).pack(pady=20)
         ctk.CTkButton(self.about_tab, text="☕ Donate Now", command=lambda: webbrowser.open_new("https://nullpk.com/donate")).pack(pady=10)
-    
+
     def check_api_connection(self):
         gemini_key = self.gemini_key_entry.get().strip()
         if not gemini_key:
@@ -992,24 +1182,24 @@ class App(ctk.CTk):
             messagebox.showerror("Connection Failed", f"Invalid API Key or network issue:\n{e}")
 
     def _extract_voice_name(self, val): return val.split(" — ")[0] if " — " in val else val
-    
+
     def update_features_based_on_style(self, selected_style):
         is_podcast = selected_style == "Podcast"
         state = "normal" if is_podcast else "disabled"
         single_state = "disabled" if is_podcast else "normal"
-        
+
         self.fact_check_checkbox.configure(state=state)
         self.style_combo.configure(state=state)
         self.story_arc_combo.configure(state="normal")
         self.voice_combo.configure(state=single_state)
         self.speaker1_combo.configure(state=state)
         self.speaker2_combo.configure(state=state)
-        
+
         self.host_entry.configure(state="normal")
         self.host_persona_entry.configure(state="normal")
         self.host_name_label.configure(text="Host Name" if is_podcast else "Narrator Name")
         self.host_persona_label.configure(text="Host Persona" if is_podcast else "Narrator Persona")
-        
+
         self.guest_entry.configure(state=state)
         self.guest_persona_entry.configure(state=state)
 
@@ -1029,9 +1219,9 @@ class App(ctk.CTk):
         """Applies predefined settings based on the selected preset."""
         if preset_name == "Custom":
             return
-            
+
         logging.info(f"Applying preset: {preset_name}")
-        
+
         # Helper to set combo box if value exists in its options
         def safe_set_combo(combo, partial_value):
             for val in combo._values:
@@ -1039,7 +1229,7 @@ class App(ctk.CTk):
                     combo.set(val)
                     return
             combo.set(partial_value)
-            
+
         if preset_name == "Tech News Short":
             self.content_style_combo.set("Podcast")
             self.update_features_based_on_style("Podcast")
@@ -1056,7 +1246,7 @@ class App(ctk.CTk):
             safe_set_combo(self.speaker2_combo, "Leda")
             self.video_style_textbox.delete("1.0", "end")
             self.video_style_textbox.insert("1.0", "Cinematic, realistic, high-quality news footage.")
-            
+
         elif preset_name == "Scary Story":
             self.content_style_combo.set("Horror Story")
             self.update_features_based_on_style("Horror Story")
@@ -1072,7 +1262,7 @@ class App(ctk.CTk):
             safe_set_combo(self.voice_combo, "Zubenelgenubi")
             self.image_style_textbox.delete("1.0", "end")
             self.image_style_textbox.insert("1.0", "Dark, moody, cinematic lighting, horror style, realistic: {topic}")
-            
+
         elif preset_name == "Educational Explainer":
             self.content_style_combo.set("Documentary")
             self.update_features_based_on_style("Documentary")
@@ -1085,7 +1275,7 @@ class App(ctk.CTk):
             safe_set_combo(self.voice_combo, "Autonoe")
             self.video_style_textbox.delete("1.0", "end")
             self.video_style_textbox.insert("1.0", "National Geographic style documentary footage, educational, clean, 4k.")
-        
+
         # Save to memory
         self.update_config_from_all_gui()
 
@@ -1093,37 +1283,37 @@ class App(ctk.CTk):
         if 0 <= step_index < len(self.progress_bars):
             self.progress_bars[step_index].set(progress)
             self.step_status_labels[step_index].configure(text=status)
-    
+
     def start_pipeline_thread(self):
         topic = self.topic_entry.get().strip()
         if not topic: messagebox.showerror("Error", "Please enter a topic."); return
         if not self.config.get("GEMINI_API_KEY"): messagebox.showerror("API Key Missing", "Please enter your Gemini API key in Settings."); return
-        
+
         self.run_button.configure(state="disabled"); self.stop_button.configure(state="normal")
         self.stop_event.clear()
         for i in range(len(PIPELINE_STEPS)): self.update_status_callback(i, "⬜", 0)
-        
+
         # This function syncs all GUI settings to the in-memory config dict
         self.update_config_from_all_gui()
-        
+
         on_finish_callback = lambda success: self.after(0, self.on_pipeline_finished, success, topic)
-        
+
         # Pass all callbacks to the pipeline instance
         pipeline_instance = Pipeline(
-            self.config, 
-            self.stop_event, 
-            self.update_status_callback, 
+            self.config,
+            self.stop_event,
+            self.update_status_callback,
             self.update_seo_callback,          # Callback for SEO
             on_finish_callback,
             self.update_timestamps_callback,   # Callback for Timestamps
             on_script_generated=self.open_script_editor # Callback for Script Editor
         )
         threading.Thread(target=pipeline_instance.run, args=(topic, self.start_step_combo.get()), daemon=True).start()
-    
+
     def open_script_editor(self, script_content, file_path, resume_event):
         """Callback from pipeline thread to open script editor in main thread."""
         self.after(0, lambda: ScriptEditorWindow(self, script_content, file_path, resume_event))
-    
+
     def stop_pipeline(self):
         logging.info("🛑 Stop signal received. Finishing current step...")
         self.stop_event.set()
@@ -1136,7 +1326,7 @@ class App(ctk.CTk):
         self.update_history_tab()
         if success:
             messagebox.showinfo("Pipeline Complete", f"Successfully generated content for topic:\n'{topic}'")
-    
+
     def update_seo_callback(self, metadata):
         """Safely updates the publish tab UI with title, description, and tags. THIS RUNS FIRST."""
         def update_ui():
@@ -1155,7 +1345,7 @@ class App(ctk.CTk):
             return
         def update_ui():
             # This APPENDS to the description, which was already set by the SEO callback
-            self.video_desc_entry.insert("end", timestamps_text) 
+            self.video_desc_entry.insert("end", timestamps_text)
             logging.info("⏰ Timestamps have been appended to the description.")
         self.after(0, update_ui)
 
@@ -1166,7 +1356,7 @@ class App(ctk.CTk):
         the user currently sees.
         """
         logging.info("Syncing all current GUI settings to in-memory config for pipeline run...")
-        
+
         # Main Tab Checkboxes
         self.config["FACT_CHECK_ENABLED"] = self.fact_check_var.get()
         self.config["GENERATE_METADATA"] = self.metadata_var.get()
@@ -1189,7 +1379,7 @@ class App(ctk.CTk):
             self.config["VIDEO_CLIP_COUNT"] = max(1, int(self.video_count_entry.get()))
         except (ValueError, TypeError):
             self.config["VIDEO_CLIP_COUNT"] = 1
-        
+
         # Settings Tab (API)
         self.config["GEMINI_API_KEY"] = self.gemini_key_entry.get().strip()
         self.config["WAVESPEED_AI_KEY"] = self.wavespeed_key_entry.get().strip()
@@ -1223,33 +1413,33 @@ class App(ctk.CTk):
         self.aspect_ratio_combo.set(self.main_aspect_ratio_combo.get())
         self.config["LANGUAGE_ENABLED"] = self.language_enabled_var.get()
         self.config["PODCAST_LANGUAGE"] = self.language_combo.get()
-        try: 
+        try:
             self.config["IMAGE_GENERATION_INTERVAL"] = int(self.image_interval_entry.get())
-        except (ValueError, TypeError): 
+        except (ValueError, TypeError):
             self.config["IMAGE_GENERATION_INTERVAL"] = 0
-        
+
         self.config["VIDEO_PROMPT_BASE_STYLE"] = self.video_style_textbox.get("1.0", "end-1c").strip()
         self.config["IMAGE_PROMPT_STYLE"] = self.image_style_textbox.get("1.0", "end-1c").strip()
-        
-    
+
+
     def save_settings_from_gui(self):
         """
         Updates the in-memory config from the GUI and then saves it to config.json.
         """
         self.update_config_from_all_gui()
-        
+
         self.config["FACEBOOK_ACCESS_TOKEN"] = self.facebook_token_entry.get().strip()
         self.config["CHANNEL_NAME"] = self.channel_entry.get().strip() or "My AI Channel"
-        try: 
+        try:
             self.config["SUBSCRIBE_COUNT"] = int(self.sub_count_entry.get())
-        except ValueError: 
+        except ValueError:
             self.config["SUBSCRIBE_COUNT"] = 3
         self.config["SUBSCRIBE_MESSAGE"] = self.sub_message_entry.get().strip()
         self.config["SUBSCRIBE_RANDOM"] = self.subscribe_random_var.get()
-        
+
         save_config(self.config)
         messagebox.showinfo("Success", "Settings have been saved successfully.")
-    
+
     def load_settings_into_gui(self):
         cfg = self.config
         self.gemini_key_entry.insert(0, cfg.get("GEMINI_API_KEY", ""))
@@ -1314,10 +1504,10 @@ class App(ctk.CTk):
         self.video_tags_entry.insert(0, cfg.get("VIDEO_TAGS", ""))
         self.update_features_based_on_style(self.content_style_combo.get())
 
-    
+
     def get_history_items(self):
         return [item for item in os.listdir('.') if os.path.isdir(item) and not item.startswith('.')]
-    
+
     def delete_history_item(self, item_name):
         if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to permanently delete '{item_name}'?"):
             try:
@@ -1325,7 +1515,7 @@ class App(ctk.CTk):
                 self.update_history_tab()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to delete '{item_name}': {e}")
-    
+
     def update_history_tab(self):
         for widget in self.history_tab.winfo_children(): widget.destroy()
         ctk.CTkLabel(self.history_tab, text="Generated Content History", font=("Arial", 20, "bold")).pack(pady=(20, 10))
@@ -1336,13 +1526,13 @@ class App(ctk.CTk):
             row = ctk.CTkFrame(self.history_tab); row.pack(fill="x", padx=20, pady=5)
             ctk.CTkLabel(row, text=item, anchor="w", font=("Arial", 12)).pack(side="left", padx=10, expand=True, fill="x")
             ctk.CTkButton(row, text="Delete", command=lambda i=item: self.delete_history_item(i), fg_color="#c42034", hover_color="#851622").pack(side="right", padx=10)
-    
+
     def generate_seo_only(self):
         topic = self.topic_entry.get().strip()
         if not topic: messagebox.showerror("Error", "Please enter a topic first."); return
         logging.info("📄 Generating SEO metadata only...")
         try:
-            google_client = GoogleClient(self.config['GEMINI_API_KEY'])
+            google_client = GoogleClient(self.config)
             news_client = NewsApiClient(self.config.get("NEWS_API_KEY"))
             research = google_client.deep_research(topic, self.config.get("PODCAST_LANGUAGE", "English"), news_client)
             script = google_client.generate_podcast_script(topic, research, self.config) # Generate a dummy script for context
@@ -1354,22 +1544,22 @@ class App(ctk.CTk):
             messagebox.showinfo("Success", "SEO Title and Description have been generated!")
         except Exception as e:
             logging.error(f"❌ SEO Generation Error: {e}", exc_info=True); messagebox.showerror("Error", f"Failed to generate SEO: {e}")
-    
+
     def browse_file(self, entry_widget):
         filename = filedialog.askopenfilename()
         if filename:
             entry_widget.delete(0, ctk.END); entry_widget.insert(0, filename)
-    
+
     def youtube_auth(self):
         CLIENT_SECRETS_FILE = "client_secrets.json"
-        if not os.path.exists(CLIENT_SECRETS_FILE): 
+        if not os.path.exists(CLIENT_SECRETS_FILE):
             messagebox.showerror("Authentication Error", f"{CLIENT_SECRETS_FILE} not found. Please place it in the application's root directory.")
             return None
         credentials = None; pickle_file = Path("token.pickle")
         if pickle_file.exists():
             with open(pickle_file, "rb") as token: credentials = pickle.load(token)
         if not credentials or not credentials.valid:
-            if credentials and credentials.expired and credentials.refresh_token: 
+            if credentials and credentials.expired and credentials.refresh_token:
                 try:
                     credentials.refresh(Request())
                 except Exception as e:
@@ -1392,7 +1582,7 @@ class App(ctk.CTk):
     def start_youtube_upload_thread(self):
         """Starts the YouTube upload process in a separate thread to avoid freezing the GUI."""
         safe_topic = re.sub(r'[\\/:*?"<>|]', '', self.topic_entry.get().strip())
-        
+
         video_path = self.video_path_entry.get().strip() or os.path.join(safe_topic, "final_podcast_video.mp4")
         thumbnail_path = self.thumbnail_path_entry.get().strip() or os.path.join(safe_topic, "generated_image.png")
 
@@ -1409,17 +1599,17 @@ class App(ctk.CTk):
             daemon=True
         )
         upload_thread.start()
-    
+
     def upload_youtube_logic(self, video_path, thumbnail_path, title, description, tags):
         """The core logic for uploading to YouTube, designed to be run in a thread."""
         try:
             self.update_upload_progress("Authenticating with YouTube...", 0.05)
             credentials = self.youtube_auth()
-            if not credentials: 
+            if not credentials:
                 logging.error("❌ YouTube authentication failed."); return
 
             youtube = build("youtube", "v3", credentials=credentials)
-            
+
             request_body = {
                 "snippet": {"title": title, "description": description, "tags": [tag.strip() for tag in tags], "categoryId": "22"},
                 "status": {"privacyStatus": "public"}
@@ -1427,21 +1617,21 @@ class App(ctk.CTk):
 
             media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
             request = youtube.videos().insert(part=",".join(request_body.keys()), body=request_body, media_body=media)
-            
+
             response = None
             while response is None:
                 status, response = request.next_chunk()
                 if status:
                     progress = int(status.progress() * 100)
                     self.update_upload_progress(f"Uploading video... {progress}%", float(progress / 100))
-            
+
             video_id = response.get('id')
             logging.info(f"✅ Video uploaded! Video ID: {video_id}")
-            
+
             if os.path.exists(thumbnail_path):
                 youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumbnail_path)).execute()
                 logging.info("✅ Thumbnail uploaded successfully.")
-            
+
             messagebox.showinfo("Upload Complete", f"Successfully uploaded to YouTube!\nURL: https://youtube.com/watch?v={video_id}")
 
         except Exception as e:
@@ -1463,7 +1653,7 @@ class App(ctk.CTk):
             init_params = {"access_token": access_token, "upload_phase": "start", "file_size": os.path.getsize(video_path)}
             init_response = requests.post(init_url, params=init_params).json()
             if "error" in init_response: raise RuntimeError(f"API Error: {init_response['error']['message']}")
-            
+
             upload_session_id = init_response["upload_session_id"]
             upload_url = f"https://graph-video.facebook.com/v20.0/{upload_session_id}"
             upload_headers = {"Authorization": f"OAuth {access_token}", "file_offset": "0"}

@@ -92,6 +92,8 @@ def load_config():
         "GENERATE_SNIPPETS": False,
         "IMAGE_GENERATION_INTERVAL": 10,
         "TIMED_IMAGES_AS_SLIDESHOW": False,
+        "COMPETITOR_CHANNELS": "@TechLead, https://youtube.com/@mkbhd",
+        "TARGET_NICHE": "US Technology & Trends",
     }
 
     # Update the loaded config with any missing default keys
