@@ -16,6 +16,7 @@ from functools import wraps
 import re
 import google.generativeai as genai
 from language_utils import effective_output_language, format_language_instruction
+from security_utils import redact_sensitive_text
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from google.api_core import exceptions as google_exceptions
 
@@ -123,15 +124,23 @@ def get_style_profile(content_style: str) -> dict:
 
 
 def handle_api_errors(func):
-    """A decorator to catch and handle common API errors, with automatic rate-limit retries."""
+    """Catch common API errors without exposing credentials in logs or tracebacks."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         max_retries = 3
+        client = args[0] if args else None
+        secrets = [getattr(client, "api_key", None)]
+        config = getattr(client, "config", {})
+        if isinstance(config, dict):
+            secrets.extend((config.get("GEMINI_API_KEY"), config.get("WAVESPEED_AI_KEY")))
+
         for attempt in range(max_retries):
             try:
                 return func(*args, **kwargs)
             except google_exceptions.ResourceExhausted as e:
-                error_str = str(e.message) if hasattr(e, "message") else str(e)
+                error_str = redact_sensitive_text(
+                    getattr(e, "message", e), *secrets
+                )
                 match = re.search(r"Please retry in ([0-9.]+)s", error_str)
                 if match and attempt < max_retries - 1:
                     wait_time = float(match.group(1)) + 1.5
@@ -142,19 +151,22 @@ def handle_api_errors(func):
                     error_message = f"Vertex AI Quota Exceeded: {error_str}. Ensure your project region is set correctly in settings."
                 else:
                     error_message = f"Gemini API Quota Exceeded: {error_str}. Please check your usage or billing plan."
-                logging.error(error_message, exc_info=True)
-                raise RuntimeError(error_message) from e
+                error_message = redact_sensitive_text(error_message, *secrets)
+                logging.error(error_message)
+                raise RuntimeError(error_message) from None
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429 and attempt < max_retries - 1:
+                status_code = e.response.status_code if e.response is not None else None
+                if status_code == 429 and attempt < max_retries - 1:
                     wait_time = 15 * (attempt + 1)
                     logging.warning(f"⏳ HTTP 429 Rate Limit. Auto-waiting {wait_time}s before retry ({attempt+1}/{max_retries})...")
                     time.sleep(wait_time)
                     continue
-                elif e.response.status_code == 429:
-                    error_message = "API rate limit heavily exceeded. Please wait manually and try again."
-                    logging.error(error_message, exc_info=True)
-                    raise RuntimeError(error_message) from e
-                raise
+                if status_code == 429:
+                    error_message = "API rate limit exceeded after retries. Wait for the quota window to reset, then try again."
+                else:
+                    error_message = redact_sensitive_text(e, *secrets)
+                logging.error("API request failed: %s", error_message)
+                raise RuntimeError(error_message) from None
     return wrapper
 
 class NewsApiClient:
@@ -168,8 +180,13 @@ class NewsApiClient:
             logging.warning("News API key is not configured. Skipping news gathering.")
             return ""
         try:
-            params = {'q': topic, 'apiKey': self.api_key}
-            response = requests.get(self.base_url, params=params, timeout=15)
+            params = {'q': topic}
+            response = requests.get(
+                self.base_url,
+                params=params,
+                headers={"X-Api-Key": self.api_key},
+                timeout=15,
+            )
             response.raise_for_status()
             articles = response.json().get('articles', [])
             if articles:
@@ -180,7 +197,8 @@ class NewsApiClient:
                 return formatted_news
             return ""
         except Exception as e:
-            logging.error(f"Could not retrieve news from NewsAPI: {e}")
+            safe_error = redact_sensitive_text(e, self.api_key)
+            logging.error("Could not retrieve news from NewsAPI: %s", safe_error)
             return ""
 
 class GoogleClient:
@@ -295,10 +313,15 @@ class GoogleClient:
 
         engine = self.config.get("TEXT_ENGINE", "Gemini API")
         if engine == "Gemini API":
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent?key={self.api_key}"
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent"
             payload = {"contents": [{"parts": [{"text": facet_prompt}]}], "tools": [{"google_search": {}}]}
             try:
-                response = requests.post(api_url, json=payload, timeout=120)
+                response = requests.post(
+                    api_url,
+                    headers={"x-goog-api-key": self.api_key},
+                    json=payload,
+                    timeout=120,
+                )
                 response.raise_for_status()
                 response_json = response.json()
                 facet_analysis = response_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text")
@@ -621,7 +644,8 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
         
         script_for_api = script.split('Text :')[-1].strip() if 'Text :' in script else script
         
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent?key={self.api_key}"
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent"
+        api_headers = {"x-goog-api-key": self.api_key}
         
         is_podcast_mode = tts_config.get("CONTENT_STYLE") == "Podcast"
         host_name = tts_config.get("HOST_NAME", "Alex")
@@ -673,7 +697,7 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
                  payload["generationConfig"]["speechConfig"] = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": tts_config.get("VOICE_NAME", tts_config.get("SPEAKER1", "Kore"))}}}
 
             
-            response = requests.post(api_url, json=payload, timeout=300)
+            response = requests.post(api_url, headers=api_headers, json=payload, timeout=300)
             response.raise_for_status()
             resp_json = response.json()
             candidates = resp_json.get("candidates", [])

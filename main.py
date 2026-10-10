@@ -36,6 +36,7 @@ from google.auth.transport.requests import Request
 from config import load_config, save_config
 from pipeline import Pipeline
 from api_clients import GoogleClient, NewsApiClient
+from security_utils import redact_sensitive_text
 from channel_presets import WWII_STICKMAN_PRESET_NAME, WWII_STICKMAN_SAMPLE_TOPIC, WWII_STICKMAN_SETTINGS
 
 # --- Constants for GUI Dropdowns ---
@@ -992,8 +993,9 @@ class App(ctk.CTk):
             messagebox.showinfo("Connection Successful", f"API Key is valid and active.\nResponse: {resp.text.strip()}")
             logging.info("Gemini API connection test passed.")
         except Exception as e:
-            logging.error(f"API Connection Failed: {e}")
-            messagebox.showerror("Connection Failed", f"Invalid API Key or network issue:\n{e}")
+            safe_error = redact_sensitive_text(e, gemini_key)
+            logging.error("API Connection Failed: %s", safe_error)
+            messagebox.showerror("Connection Failed", f"Invalid API Key or network issue:\n{safe_error}")
 
     def _extract_voice_name(self, val): return val.split(" — ")[0] if " — " in val else val
     
