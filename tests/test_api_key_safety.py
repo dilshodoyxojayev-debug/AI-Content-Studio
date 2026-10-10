@@ -29,6 +29,13 @@ class ApiKeySafetyTests(unittest.TestCase):
         self.assertNotIn("?key={self.api_key}", source)
         self.assertEqual(source.count('"x-goog-api-key": self.api_key'), 2)
 
+    def test_settings_can_paste_key_from_clipboard_without_logging_value(self):
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+        self.assertIn('text="📋 Paste"', source)
+        self.assertIn("self.clipboard_get().strip()", source)
+        self.assertIn("value hidden", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -600,6 +600,13 @@ class App(ctk.CTk):
         ctk.CTkLabel(api_tab, text="Gemini API Key").grid(row=6, column=0, sticky="w", padx=10, pady=8)
         self.gemini_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.gemini_key_entry.grid(row=6, column=1, padx=10, sticky="ew")
         ctk.CTkButton(api_tab, text="🛜 Check Connection", command=self.check_api_connection).grid(row=6, column=2, padx=10, sticky="w")
+        self.paste_gemini_key_button = ctk.CTkButton(
+            api_tab,
+            text="📋 Paste",
+            command=self.paste_gemini_api_key,
+            width=80,
+        )
+        self.paste_gemini_key_button.grid(row=6, column=3, padx=(0, 10), sticky="w")
         
         ctk.CTkLabel(api_tab, text="WaveSpeed AI Key").grid(row=7, column=0, sticky="w", padx=10, pady=8)
         self.wavespeed_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.wavespeed_key_entry.grid(row=7, column=1, columnspan=2, padx=10, sticky="ew")
@@ -979,6 +986,24 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.about_tab, text="This tool automates the creation of YouTube videos using AI.", wraplength=500).pack(pady=20)
         ctk.CTkButton(self.about_tab, text="☕ Donate Now", command=lambda: webbrowser.open_new("https://nullpk.com/donate")).pack(pady=10)
     
+    def paste_gemini_api_key(self):
+        """Paste the Gemini key from the clipboard without revealing it."""
+        try:
+            gemini_key = self.clipboard_get().strip()
+        except Exception:
+            gemini_key = ""
+
+        if not gemini_key:
+            messagebox.showerror(
+                "Clipboard Empty",
+                "Copy the Gemini API key in Google AI Studio, then click Paste again.",
+            )
+            return
+
+        self.gemini_key_entry.delete(0, "end")
+        self.gemini_key_entry.insert(0, gemini_key)
+        logging.info("Gemini API key pasted from the clipboard (value hidden).")
+
     def check_api_connection(self):
         gemini_key = self.gemini_key_entry.get().strip()
         if not gemini_key:
