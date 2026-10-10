@@ -36,6 +36,8 @@ from google.auth.transport.requests import Request
 from config import load_config, save_config
 from pipeline import Pipeline
 from api_clients import GoogleClient, NewsApiClient
+from security_utils import redact_sensitive_text
+from channel_presets import WWII_STICKMAN_PRESET_NAME, WWII_STICKMAN_SAMPLE_TOPIC, WWII_STICKMAN_SETTINGS
 
 # --- Constants for GUI Dropdowns ---
 PIPELINE_STEPS = [
@@ -71,7 +73,7 @@ VOICE_OPTIONS = {
 }
 PODCAST_STYLES = ["Informative News", "Comedy / Entertaining", "Educational / Explainer", "Motivational / Inspiring", "Casual Conversational", "Serious Debate", "Story Mode", "Documentary", "ASMR"]
 STORY_ARCS = ["None", "Hero's Journey", "Three-Act Structure", "Man vs. Nature", "Rags to Riches", "Voyage and Return"]
-CONTENT_STYLES = ["Podcast", "ASMR Video", "Documentary", "Product Ad", "Story", "Kids Story", "Horror Story", "Viral Video"]
+CONTENT_STYLES = ["Podcast", "ASMR Video", "Documentary", "Stickman History", "Product Ad", "Story", "Kids Story", "Horror Story", "Viral Video"]
 SCRIPT_LENGTHS = ["Short (~2 minutes)", "Medium (~5 minutes)", "Long (~10 minutes)"]
 
 
@@ -462,7 +464,7 @@ class App(ctk.CTk):
         preset_frame = ctk.CTkFrame(controls_frame, fg_color="transparent")
         preset_frame.pack(pady=(10, 5), fill="x", padx=20)
         ctk.CTkLabel(preset_frame, text="Quick Presets:", font=("Arial", 12, "bold")).pack(side="left", padx=(0, 10))
-        self.preset_combo = ctk.CTkComboBox(preset_frame, values=["Custom", "Tech News Short", "Scary Story", "Educational Explainer"], width=200, command=self.apply_preset)
+        self.preset_combo = ctk.CTkComboBox(preset_frame, values=["Custom", "Tech News Short", "Scary Story", "Educational Explainer", WWII_STICKMAN_PRESET_NAME], width=200, command=self.apply_preset)
         self.preset_combo.pack(side="left")
 
         ctk.CTkLabel(controls_frame, text="Enter Topic", font=("Arial", 16, "bold")).pack(pady=(15, 5))
@@ -598,6 +600,13 @@ class App(ctk.CTk):
         ctk.CTkLabel(api_tab, text="Gemini API Key").grid(row=6, column=0, sticky="w", padx=10, pady=8)
         self.gemini_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.gemini_key_entry.grid(row=6, column=1, padx=10, sticky="ew")
         ctk.CTkButton(api_tab, text="🛜 Check Connection", command=self.check_api_connection).grid(row=6, column=2, padx=10, sticky="w")
+        self.paste_gemini_key_button = ctk.CTkButton(
+            api_tab,
+            text="📋 Paste",
+            command=self.paste_gemini_api_key,
+            width=80,
+        )
+        self.paste_gemini_key_button.grid(row=6, column=3, padx=(0, 10), sticky="w")
         
         ctk.CTkLabel(api_tab, text="WaveSpeed AI Key").grid(row=7, column=0, sticky="w", padx=10, pady=8)
         self.wavespeed_key_entry = ctk.CTkEntry(api_tab, width=400, show="*"); self.wavespeed_key_entry.grid(row=7, column=1, columnspan=2, padx=10, sticky="ew")
@@ -659,13 +668,16 @@ class App(ctk.CTk):
         ctk.CTkLabel(advanced_tab, text="Image Interval (s)").grid(row=10, column=0, sticky="w", padx=10, pady=5)
         self.image_interval_entry = ctk.CTkEntry(advanced_tab, width=100, placeholder_text="0 for Auto"); self.image_interval_entry.grid(row=10, column=1, padx=10, sticky="w")
         self.language_enabled_var = ctk.BooleanVar()
-        ctk.CTkCheckBox(advanced_tab, text="Enable Language Selection", variable=self.language_enabled_var).grid(row=11, column=0, columnspan=2, pady=5, padx=10, sticky="w")
-        ctk.CTkLabel(advanced_tab, text="Podcast Language").grid(row=12, column=0, sticky="w", padx=10, pady=5)
-        self.language_combo = ctk.CTkComboBox(advanced_tab, values=["English", "Spanish", "French", "German", "Urdu"], width=300); self.language_combo.grid(row=12, column=1, padx=10, sticky="w")
+        self.language_enabled_checkbox = ctk.CTkCheckBox(advanced_tab, text="Enable Language Selection", variable=self.language_enabled_var)
+        self.language_enabled_checkbox.grid(row=11, column=0, columnspan=2, pady=5, padx=10, sticky="w")
+        ctk.CTkLabel(advanced_tab, text="Script & Narration Language").grid(row=12, column=0, sticky="w", padx=10, pady=5)
+        self.language_combo = ctk.CTkComboBox(advanced_tab, values=["English", "Spanish", "French", "German", "Urdu", "Uzbek (Cyrillic)"], width=300); self.language_combo.grid(row=12, column=1, padx=10, sticky="w")
         ctk.CTkLabel(advanced_tab, text="Desired Script Length").grid(row=13, column=0, sticky="w", padx=10, pady=5)
         self.script_length_combo = ctk.CTkComboBox(advanced_tab, values=SCRIPT_LENGTHS, width=300); self.script_length_combo.grid(row=13, column=1, padx=10, sticky="w")
         ctk.CTkLabel(advanced_tab, text="Video Aspect Ratio").grid(row=14, column=0, sticky="w", padx=10, pady=5)
         self.aspect_ratio_combo = ctk.CTkComboBox(advanced_tab, values=["16:9 (Horizontal)", "9:16 (Vertical)"], width=300); self.aspect_ratio_combo.grid(row=14, column=1, padx=10, sticky="w")
+        self.single_speaker_cta_var = ctk.BooleanVar()
+        ctk.CTkCheckBox(advanced_tab, text="Include subscribe reminder in narrated videos", variable=self.single_speaker_cta_var).grid(row=15, column=0, columnspan=2, pady=5, padx=10, sticky="w")
         ctk.CTkButton(self.settings_tab, text="💾 Save Settings", command=self.save_settings_from_gui).pack(pady=20)
     
     def _create_publish_tab_widgets(self):
@@ -974,6 +986,24 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.about_tab, text="This tool automates the creation of YouTube videos using AI.", wraplength=500).pack(pady=20)
         ctk.CTkButton(self.about_tab, text="☕ Donate Now", command=lambda: webbrowser.open_new("https://nullpk.com/donate")).pack(pady=10)
     
+    def paste_gemini_api_key(self):
+        """Paste the Gemini key from the clipboard without revealing it."""
+        try:
+            gemini_key = self.clipboard_get().strip()
+        except Exception:
+            gemini_key = ""
+
+        if not gemini_key:
+            messagebox.showerror(
+                "Clipboard Empty",
+                "Copy the Gemini API key in Google AI Studio, then click Paste again.",
+            )
+            return
+
+        self.gemini_key_entry.delete(0, "end")
+        self.gemini_key_entry.insert(0, gemini_key)
+        logging.info("Gemini API key pasted from the clipboard (value hidden).")
+
     def check_api_connection(self):
         gemini_key = self.gemini_key_entry.get().strip()
         if not gemini_key:
@@ -988,8 +1018,9 @@ class App(ctk.CTk):
             messagebox.showinfo("Connection Successful", f"API Key is valid and active.\nResponse: {resp.text.strip()}")
             logging.info("Gemini API connection test passed.")
         except Exception as e:
-            logging.error(f"API Connection Failed: {e}")
-            messagebox.showerror("Connection Failed", f"Invalid API Key or network issue:\n{e}")
+            safe_error = redact_sensitive_text(e, gemini_key)
+            logging.error("API Connection Failed: %s", safe_error)
+            messagebox.showerror("Connection Failed", f"Invalid API Key or network issue:\n{safe_error}")
 
     def _extract_voice_name(self, val): return val.split(" — ")[0] if " — " in val else val
     
@@ -998,7 +1029,8 @@ class App(ctk.CTk):
         state = "normal" if is_podcast else "disabled"
         single_state = "disabled" if is_podcast else "normal"
         
-        self.fact_check_checkbox.configure(state=state)
+        # Fact-checking is useful for every content style, not only podcasts.
+        self.fact_check_checkbox.configure(state="normal")
         self.style_combo.configure(state=state)
         self.story_arc_combo.configure(state="normal")
         self.voice_combo.configure(state=single_state)
@@ -1012,6 +1044,16 @@ class App(ctk.CTk):
         
         self.guest_entry.configure(state=state)
         self.guest_persona_entry.configure(state=state)
+
+        if selected_style == "Stickman History":
+            # Keep every video in this channel preset English-only.
+            self.language_enabled_var.set(True)
+            self.language_combo.set("English")
+            self.language_enabled_checkbox.configure(state="disabled")
+            self.language_combo.configure(state="disabled")
+        else:
+            self.language_enabled_checkbox.configure(state="normal")
+            self.language_combo.configure(state="normal")
 
     def _on_bg_mode_change(self, mode):
         """Show/hide count fields based on selected background mode."""
@@ -1086,6 +1128,56 @@ class App(ctk.CTk):
             self.video_style_textbox.delete("1.0", "end")
             self.video_style_textbox.insert("1.0", "National Geographic style documentary footage, educational, clean, 4k.")
         
+        elif preset_name == WWII_STICKMAN_PRESET_NAME:
+            settings = WWII_STICKMAN_SETTINGS
+            self.content_style_combo.set(settings["CONTENT_STYLE"])
+            self.update_features_based_on_style(settings["CONTENT_STYLE"])
+            self.main_aspect_ratio_combo.set(settings["VIDEO_ASPECT_RATIO"])
+            self.aspect_ratio_combo.set(settings["VIDEO_ASPECT_RATIO"])
+            self.start_step_combo.set("Deep Research")
+            self.bg_mode_var.set(settings["BG_MODE"])
+            self._on_bg_mode_change(settings["BG_MODE"])
+            self.fact_check_var.set(settings["FACT_CHECK_ENABLED"])
+            self.metadata_var.set(settings["GENERATE_METADATA"])
+            self.timestamps_var.set(settings["GENERATE_TIMESTAMPS"])
+            self.caption_var.set(settings["CAPTION_ENABLED"])
+            self.add_music_var.set(settings["ADD_MUSIC"])
+            self.generate_snippets_var.set(settings["GENERATE_SNIPPETS"])
+            self.generate_thumbnail_var.set(settings["GENERATE_THUMBNAIL"])
+            self.story_arc_combo.set(settings["STORY_ARC"])
+            safe_set_combo(self.style_combo, settings["PODCAST_STYLE"])
+            safe_set_combo(self.voice_combo, settings["VOICE_NAME"])
+            safe_set_combo(self.speaker1_combo, settings["SPEAKER1"])
+            self.script_length_combo.set(settings["SCRIPT_LENGTH"])
+            self.language_enabled_var.set(settings["LANGUAGE_ENABLED"])
+            self.language_combo.set(settings["PODCAST_LANGUAGE"])
+            self.text_engine_combo.set(settings["TEXT_ENGINE"])
+            self.image_engine_combo.set(settings["IMAGE_ENGINE"])
+            self.audio_engine_combo.set(settings["AUDIO_ENGINE"])
+            self.single_speaker_cta_var.set(settings["SINGLE_SPEAKER_CTA"])
+            self.subscribe_random_var.set(settings["SUBSCRIBE_RANDOM"])
+            self.channel_entry.delete(0, "end")
+            self.channel_entry.insert(0, settings["CHANNEL_NAME"])
+            self.sub_count_entry.delete(0, "end")
+            self.sub_count_entry.insert(0, str(settings["SUBSCRIBE_COUNT"]))
+            self.sub_message_entry.delete(0, "end")
+            self.sub_message_entry.insert(0, settings["SUBSCRIBE_MESSAGE"])
+            self.host_entry.delete(0, "end")
+            self.host_entry.insert(0, settings["HOST_NAME"])
+            self.host_persona_entry.delete("1.0", "end")
+            self.host_persona_entry.insert("1.0", settings["HOST_PERSONA"])
+            self.video_style_textbox.delete("1.0", "end")
+            self.video_style_textbox.insert("1.0", settings["VIDEO_PROMPT_BASE_STYLE"])
+            self.image_style_textbox.delete("1.0", "end")
+            self.image_style_textbox.insert("1.0", settings["IMAGE_PROMPT_STYLE"])
+            self.image_count_entry.delete(0, "end")
+            self.image_count_entry.insert(0, str(settings["IMAGE_COUNT"]))
+            self.image_interval_entry.delete(0, "end")
+            self.image_interval_entry.insert(0, str(settings["IMAGE_GENERATION_INTERVAL"]))
+            if not self.topic_entry.get().strip():
+                self.topic_entry.insert(0, WWII_STICKMAN_SAMPLE_TOPIC)
+            self.config.update(settings)
+
         # Save to memory
         self.update_config_from_all_gui()
 
@@ -1175,6 +1267,14 @@ class App(ctk.CTk):
         self.config["ADD_MUSIC"] = self.add_music_var.get()
         self.config["GENERATE_SNIPPETS"] = self.generate_snippets_var.get()
         self.config["GENERATE_THUMBNAIL"] = self.generate_thumbnail_var.get()
+        self.config["SINGLE_SPEAKER_CTA"] = self.single_speaker_cta_var.get()
+        self.config["CHANNEL_NAME"] = self.channel_entry.get().strip() or "My AI Channel"
+        self.config["SUBSCRIBE_MESSAGE"] = self.sub_message_entry.get().strip()
+        self.config["SUBSCRIBE_RANDOM"] = self.subscribe_random_var.get()
+        try:
+            self.config["SUBSCRIBE_COUNT"] = max(0, int(self.sub_count_entry.get()))
+        except (ValueError, TypeError):
+            self.config["SUBSCRIBE_COUNT"] = 3
         self.config["CONTENT_STYLE"] = self.content_style_combo.get()
         # Background mode (replaces old GENERATE_TIMED_IMAGES + TIMED_IMAGES_AS_SLIDESHOW)
         bg_mode = self.bg_mode_var.get()
@@ -1221,8 +1321,9 @@ class App(ctk.CTk):
         self.config["VIDEO_ASPECT_RATIO"] = self.main_aspect_ratio_combo.get()
         # Keep settings tab combo in sync
         self.aspect_ratio_combo.set(self.main_aspect_ratio_combo.get())
-        self.config["LANGUAGE_ENABLED"] = self.language_enabled_var.get()
-        self.config["PODCAST_LANGUAGE"] = self.language_combo.get()
+        english_only_channel = self.content_style_combo.get() == "Stickman History"
+        self.config["LANGUAGE_ENABLED"] = True if english_only_channel else self.language_enabled_var.get()
+        self.config["PODCAST_LANGUAGE"] = "English" if english_only_channel else self.language_combo.get()
         try: 
             self.config["IMAGE_GENERATION_INTERVAL"] = int(self.image_interval_entry.get())
         except (ValueError, TypeError): 
@@ -1241,8 +1342,8 @@ class App(ctk.CTk):
         self.config["FACEBOOK_ACCESS_TOKEN"] = self.facebook_token_entry.get().strip()
         self.config["CHANNEL_NAME"] = self.channel_entry.get().strip() or "My AI Channel"
         try: 
-            self.config["SUBSCRIBE_COUNT"] = int(self.sub_count_entry.get())
-        except ValueError: 
+            self.config["SUBSCRIBE_COUNT"] = max(0, int(self.sub_count_entry.get()))
+        except (ValueError, TypeError):
             self.config["SUBSCRIBE_COUNT"] = 3
         self.config["SUBSCRIBE_MESSAGE"] = self.sub_message_entry.get().strip()
         self.config["SUBSCRIBE_RANDOM"] = self.subscribe_random_var.get()
@@ -1267,6 +1368,7 @@ class App(ctk.CTk):
         self.sub_count_entry.insert(0, str(cfg.get("SUBSCRIBE_COUNT", 3)))
         self.sub_message_entry.insert(0, cfg.get("SUBSCRIBE_MESSAGE", ""))
         self.subscribe_random_var.set(cfg.get("SUBSCRIBE_RANDOM", True))
+        self.single_speaker_cta_var.set(cfg.get("SINGLE_SPEAKER_CTA", False))
         self.style_combo.set(cfg.get("PODCAST_STYLE", "Informative News"))
         self.story_arc_combo.set(cfg.get("STORY_ARC", "None"))
         self.video_style_textbox.insert("1.0", cfg.get("VIDEO_PROMPT_BASE_STYLE", "An animated and cinematic video. High-quality, 24fps."))
@@ -1341,8 +1443,9 @@ class App(ctk.CTk):
         topic = self.topic_entry.get().strip()
         if not topic: messagebox.showerror("Error", "Please enter a topic first."); return
         logging.info("📄 Generating SEO metadata only...")
+        self.update_config_from_all_gui()
         try:
-            google_client = GoogleClient(self.config['GEMINI_API_KEY'])
+            google_client = GoogleClient(self.config)
             news_client = NewsApiClient(self.config.get("NEWS_API_KEY"))
             research = google_client.deep_research(topic, self.config.get("PODCAST_LANGUAGE", "English"), news_client)
             script = google_client.generate_podcast_script(topic, research, self.config) # Generate a dummy script for context

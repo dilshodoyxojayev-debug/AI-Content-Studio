@@ -15,6 +15,8 @@ import logging
 from functools import wraps
 import re
 import google.generativeai as genai
+from language_utils import effective_output_language, format_language_instruction
+from security_utils import redact_sensitive_text
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from google.api_core import exceptions as google_exceptions
 
@@ -61,6 +63,13 @@ STYLE_PROFILES = {
         "video": "Cinematic documentary footage. Sweeping aerial shots, dramatic landscapes, slow zooms. Film grain, desaturated color grading, epic atmosphere.",
         "image": "Documentary-style photography. High contrast, dramatic lighting, journalistic realism. Cinematic color grading.",
         "research": "Find historical context, expert quotes, compelling statistics, and the human story behind the facts.",
+    },
+    "Stickman History": {
+        "script": "Create a fact-first WWII history documentary for a general audience. Open with a striking question or documented surprise, then explain the context and timeline clearly. Separate well-supported facts from disputed claims, never invent quotes, motives, or details, and end with a thoughtful human-centered takeaway. Suspense is welcome; sensationalism, gore, and glorification of war or extremist ideology are not.",
+        "tts": "(Speaking as a curious, authoritative history narrator — clear, warm, measured, and suspenseful without sensationalism)",
+        "video": "Consistent 2D hand-drawn stick-figure animation: simple black-line characters with round heads and expressive poses, historically grounded WWII uniforms, maps, documents and period props. Restrained charcoal, sepia and olive palette, cinematic framing, smooth readable motion. Educational and respectful; no gore, no glorification of war or extremist ideology.",
+        "image": "Consistent 2D hand-drawn WWII stickman illustration: simple black-line figures with round heads and expressive poses, historically grounded uniforms, maps and period props, restrained sepia and olive palette, cinematic composition. Educational and respectful; no gore or glorification.",
+        "research": "Prioritize primary records and reputable museum, archive, university, or scholarly sources. Build a dated chronology and identify the people, units, operation names, and evidence. Distinguish documented facts from disputed interpretations, later myths, and unverified claims; never present an unsourced legend as a secret.",
     },
     "Story": {
         "script": "Write a compelling narrative story with a clear beginning, rising action, climax, and resolution. Use vivid descriptions, character voices, and emotional beats.",
@@ -115,15 +124,23 @@ def get_style_profile(content_style: str) -> dict:
 
 
 def handle_api_errors(func):
-    """A decorator to catch and handle common API errors, with automatic rate-limit retries."""
+    """Catch common API errors without exposing credentials in logs or tracebacks."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         max_retries = 3
+        client = args[0] if args else None
+        secrets = [getattr(client, "api_key", None)]
+        config = getattr(client, "config", {})
+        if isinstance(config, dict):
+            secrets.extend((config.get("GEMINI_API_KEY"), config.get("WAVESPEED_AI_KEY")))
+
         for attempt in range(max_retries):
             try:
                 return func(*args, **kwargs)
             except google_exceptions.ResourceExhausted as e:
-                error_str = str(e.message) if hasattr(e, "message") else str(e)
+                error_str = redact_sensitive_text(
+                    getattr(e, "message", e), *secrets
+                )
                 match = re.search(r"Please retry in ([0-9.]+)s", error_str)
                 if match and attempt < max_retries - 1:
                     wait_time = float(match.group(1)) + 1.5
@@ -134,19 +151,22 @@ def handle_api_errors(func):
                     error_message = f"Vertex AI Quota Exceeded: {error_str}. Ensure your project region is set correctly in settings."
                 else:
                     error_message = f"Gemini API Quota Exceeded: {error_str}. Please check your usage or billing plan."
-                logging.error(error_message, exc_info=True)
-                raise RuntimeError(error_message) from e
+                error_message = redact_sensitive_text(error_message, *secrets)
+                logging.error(error_message)
+                raise RuntimeError(error_message) from None
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429 and attempt < max_retries - 1:
+                status_code = e.response.status_code if e.response is not None else None
+                if status_code == 429 and attempt < max_retries - 1:
                     wait_time = 15 * (attempt + 1)
                     logging.warning(f"⏳ HTTP 429 Rate Limit. Auto-waiting {wait_time}s before retry ({attempt+1}/{max_retries})...")
                     time.sleep(wait_time)
                     continue
-                elif e.response.status_code == 429:
-                    error_message = "API rate limit heavily exceeded. Please wait manually and try again."
-                    logging.error(error_message, exc_info=True)
-                    raise RuntimeError(error_message) from e
-                raise
+                if status_code == 429:
+                    error_message = "API rate limit exceeded after retries. Wait for the quota window to reset, then try again."
+                else:
+                    error_message = redact_sensitive_text(e, *secrets)
+                logging.error("API request failed: %s", error_message)
+                raise RuntimeError(error_message) from None
     return wrapper
 
 class NewsApiClient:
@@ -160,8 +180,13 @@ class NewsApiClient:
             logging.warning("News API key is not configured. Skipping news gathering.")
             return ""
         try:
-            params = {'q': topic, 'apiKey': self.api_key}
-            response = requests.get(self.base_url, params=params, timeout=15)
+            params = {'q': topic}
+            response = requests.get(
+                self.base_url,
+                params=params,
+                headers={"X-Api-Key": self.api_key},
+                timeout=15,
+            )
             response.raise_for_status()
             articles = response.json().get('articles', [])
             if articles:
@@ -172,7 +197,8 @@ class NewsApiClient:
                 return formatted_news
             return ""
         except Exception as e:
-            logging.error(f"Could not retrieve news from NewsAPI: {e}")
+            safe_error = redact_sensitive_text(e, self.api_key)
+            logging.error("Could not retrieve news from NewsAPI: %s", safe_error)
             return ""
 
 class GoogleClient:
@@ -264,90 +290,111 @@ class GoogleClient:
     @handle_api_errors
     def deep_research(self, topic: str, language: str, news_client: NewsApiClient) -> str:
         logging.info(f"Conducting advanced deep research for '{topic}'...")
-        external_data = news_client.get_news(topic)
-        
-        language_instruction = ""
-        if language and language.lower() == 'urdu':
-            language_instruction = "All output text must be written in Roman Urdu."
-        elif language:
-            language_instruction = f"All output text must be written in {language}."
+        content_style = self.config.get("CONTENT_STYLE", "Podcast")
+        language = effective_output_language(self.config)
+        profile = get_style_profile(content_style)
+        if content_style == "Stickman History":
+            logging.info("Historical profile selected; skipping unrelated current-news headlines.")
+            external_data = ""
+        else:
+            external_data = news_client.get_news(topic)
 
+        language_instruction = format_language_instruction(language, "output text")
         logging.info("Research Step 1: Identifying key facets and sub-topics...")
         facet_prompt = (
             f"Using Google Search, perform a deep analysis of the topic '{topic}'. "
             "Identify: "
             "1. Key sub-topics and foundational concepts. "
-            "2. The main individuals, companies, or entities involved. "
+            "2. The main individuals, units, organizations, and locations involved. "
             "3. The primary points of controversy, debate, or public questions. "
+            f"Research focus: {profile.get('research', '')} "
             f"Format this analysis as a structured brief. {language_instruction}"
         )
-        
+
         engine = self.config.get("TEXT_ENGINE", "Gemini API")
-        
         if engine == "Gemini API":
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent?key={self.api_key}"
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent"
             payload = {"contents": [{"parts": [{"text": facet_prompt}]}], "tools": [{"google_search": {}}]}
             try:
-                response = requests.post(api_url, json=payload, timeout=120)
+                response = requests.post(
+                    api_url,
+                    headers={"x-goog-api-key": self.api_key},
+                    json=payload,
+                    timeout=120,
+                )
                 response.raise_for_status()
                 response_json = response.json()
                 facet_analysis = response_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text")
-                if not facet_analysis: raise ValueError("No text content found in Gemini research (Facet Analysis).")
+                if not facet_analysis:
+                    raise ValueError("No text content found in Gemini research (Facet Analysis).")
             except requests.exceptions.HTTPError:
-                raise # Let the @handle_api_errors wrapper manage retries
+                raise  # Let the @handle_api_errors wrapper manage retries
             except Exception as e:
                 logging.error(f"Failed during Research Step 1 (Facet Analysis): {e}")
                 raise RuntimeError(f"Failed research step 1: {e}")
         else:
-            logging.info("Using non-Gemini engine for research. Skipping native Google Search Tool and relying on NewsAPI context.")
+            logging.info("Using non-Gemini text engine for research; native Google Search grounding is unavailable.")
             facet_analysis = self._generate_text(facet_prompt)
 
         logging.info("Research Step 2: Synthesizing final summary...")
+        if content_style == "Stickman History":
+            synthesis_task = (
+                "Use only the supplied research/search results to build a concise historical dossier. "
+                "Cover the WWII context, dated chronology, key people or units, what happened, and why the "
+                "event is surprising. Include a short list of source titles and organizations/URLs when the "
+                "search results provide them. Never invent a source, date, quote, or motive. Clearly label "
+                "documented facts, disputed interpretations, and claims that remain unverified; say when evidence is uncertain."
+            )
+            news_label = "No separate current-news feed was requested for this historical topic."
+        else:
+            synthesis_task = (
+                "Using ONLY the information provided in the sources above, write a detailed, synthesized summary. "
+                "Cover the topic's background, why it is trending, key facts, primary controversies/debates, and the future outlook."
+            )
+            news_label = "A feed of recent news headlines"
+
         synthesis_prompt = (
-            f"You are a research analyst. Your goal is to create a single, comprehensive, and well-structured summary on the topic '{topic}'. "
-            "You must synthesize the following two sources of information: "
-            f"\nSOURCE 1: A preliminary analysis of the topic's key facets:\n---START SOURCE 1---\n{facet_analysis}\n---END SOURCE 1---"
-            f"\nSOURCE 2: A feed of recent news headlines:\n---START SOURCE 2---\n{external_data}\n---END SOURCE 2---"
-            "\nYOUR TASK: "
-            "Using ONLY the information provided in the sources above, write a detailed, synthesized summary. This summary must cover the topic's background, why it is trending, key facts, primary controversies/debates, and the future outlook. "
-            "Ensure the summary is well-organized, factually dense, and coherent. "
+            f"You are a research analyst. Create a comprehensive, well-structured summary on '{topic}'. "
+            "Synthesize the following sources: "
+            f"\nSOURCE 1: Preliminary analysis of key facets:\n---START SOURCE 1---\n{facet_analysis}\n---END SOURCE 1---"
+            f"\nSOURCE 2: {news_label}:\n---START SOURCE 2---\n{external_data}\n---END SOURCE 2---"
+            f"\nYOUR TASK: {synthesis_task} "
+            "Ensure the summary is coherent and do not add unsupported details. "
             f"{language_instruction}"
         )
-        
         return self._generate_text(synthesis_prompt)
 
     @handle_api_errors
     def generate_seo_metadata(self, topic: str, script: str) -> dict:
-        logging.info("Generating expert SEO metadata from final script...")
+        logging.info("Generating expert YouTube SEO metadata from final script...")
+        language = effective_output_language(self.config)
+        language_instruction = format_language_instruction(language, "title, description, and tags")
         prompt = f"""
-        Act as a world-class YouTube SEO strategist. Your task is to generate a complete, optimized metadata package for a video based on its final script.
+        Act as a world-class YouTube SEO strategist. Generate an optimized metadata package for the video script below.
         CRITICAL INSTRUCTIONS:
-        1.  **Title:** Create a title that is keyword-rich at the beginning, creates intrigue, uses power words/numbers, and is under 70 characters.
-        2.  **Description:** Write a 3-paragraph description. The first sentence must be a captivating hook with the main keywords. The rest should summarize the key points discussed in the script.
-        3.  **Tags:** Generate 10-15 comma-separated tags, mixing broad and specific (long-tail) keywords. The first tag must be the main keyword.
-        4.  **Output Format:** Your response MUST be a single, valid JSON object and nothing else. Do not include intros, explanations, or code blocks.
-            -   JSON must have keys: "title", "description", "tags".
-            -   **DO NOT** include timestamps in this output.
+        1. **Title:** Put the main keyword near the beginning, create curiosity without making unsupported claims, and stay under 70 characters.
+        2. **Description:** Write three concise paragraphs. Open with a captivating, accurate hook and summarize the key points.
+        3. **Tags:** Generate 10-15 comma-separated broad and specific tags. Put the main keyword first.
+        4. **Language:** {language_instruction}
+        5. **Output:** Return one valid JSON object only, with keys "title", "description", and "tags". Do not include timestamps or markdown.
         **VIDEO TOPIC:** {topic}
-        **FULL SCRIPT (for context):**
+        **FULL SCRIPT:**
         ```
         {script}
         ```
-        Generate the complete JSON metadata package now.
+        Generate the JSON metadata package now.
         """
         response_text = self._generate_text(prompt, as_json=True)
-        
+
         try:
-            return json.loads(response.text)
+            return json.loads(response_text)
         except json.JSONDecodeError:
             logging.warning("Initial JSON parsing failed for SEO. Attempting to extract and clean.")
             try:
-                text = response_text
-                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group(0))
-                else:
-                    raise ValueError("No JSON object found in the SEO response.")
+                raise ValueError("No JSON object found in the SEO response.")
             except (json.JSONDecodeError, ValueError) as e:
                 logging.error(f"Failed to decode JSON for SEO after fallback: {e}")
                 return {"title": topic, "description": "Failed to generate description.", "tags": topic.replace(" ", ",")}
@@ -380,11 +427,8 @@ class GoogleClient:
             sub_instruction = podcast_sub_style_map.get(podcast_sub_style, script_instruction)
             script_instruction = f"{script_instruction} Sub-style: {sub_instruction}"
 
-        language_instruction = "The entire script must be in English."
-        if config.get("LANGUAGE_ENABLED", False):
-            language = config.get("PODCAST_LANGUAGE", "English")
-            if language.lower() == 'urdu': language_instruction = "The entire script must be in Roman Urdu."
-            else: language_instruction = f"The entire script must be in {language}."
+        script_language = effective_output_language(config)
+        language_instruction = format_language_instruction(script_language, "entire script")
 
         length_instruction = f"The total word count must be appropriate for a '{script_length}' spoken video."
         story_arc_prompt = f"Structure the script to follow the '{story_arc}' narrative arc." if story_arc != "None" else ""
@@ -432,6 +476,16 @@ Generate the complete script now.
         else:
             logging.info(f"Generating SINGLE-SPEAKER script for '{content_style}' mode.")
             narrator_persona = config.get("HOST_PERSONA", "")
+            single_speaker_cta = ""
+            if config.get("SINGLE_SPEAKER_CTA", False):
+                try:
+                    sub_count = max(0, int(config.get("SUBSCRIBE_COUNT", 1)))
+                except (TypeError, ValueError):
+                    sub_count = 1
+                sub_message = config.get("SUBSCRIBE_MESSAGE", "").replace("{channel}", config.get("CHANNEL_NAME", "My AI Channel"))
+                if sub_count and sub_message:
+                    placement = "near the outro" if not config.get("SUBSCRIBE_RANDOM", False) else "naturally during the narration"
+                    single_speaker_cta = f"Include this exact channel reminder {sub_count} time(s), {placement}: \"{sub_message}\"."
 
             prompt = f"""
 You are an expert scriptwriter specializing in '{content_style}' content. Create an immersive, authentic script.
@@ -450,6 +504,7 @@ You are an expert scriptwriter specializing in '{content_style}' content. Create
 - {story_arc_prompt}
 
 **STRUCTURE:** Hook → Introduction → Main Body → Conclusion
+**CHANNEL REMINDER:** {single_speaker_cta}
 
 **RESEARCH:**
 ```
@@ -479,14 +534,19 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
 
 
     @handle_api_errors
-    def generate_thumbnail_prompts(self, topic: str, title_text: str) -> dict:
-        logging.info("Generating dynamic prompts for split-screen thumbnail...")
+    def generate_thumbnail_prompts(self, topic: str, title_text: str, content_style: str = "Podcast", style_guide: str = "") -> dict:
+        logging.info("Generating channel-style split-screen thumbnail prompts...")
+        profile = get_style_profile(content_style)
+        visual_style = profile["image"]
+        extra = f" Additional channel style notes: {style_guide}" if style_guide and style_guide.strip() else ""
         prompt = f"""
-        Act as a viral YouTube thumbnail designer. Generate two separate image prompts for a split-screen thumbnail.
-        The left side is a photorealistic, emotional character relevant to the topic. The right side is a graphic design with the video title.
+        Act as a YouTube thumbnail designer. Create two distinct image prompts for the existing split-screen thumbnail layout.
+        Keep both panels consistent with this channel's visual identity: {visual_style}{extra}
+        LEFT PANEL: One expressive character or scene relevant to the topic; use the channel's illustration style, not photorealism when the style is illustrated.
+        RIGHT PANEL: A clean, high-contrast title card with ample empty space for the exact video title. Avoid extra lettering and misspelled words.
         VIDEO TOPIC: {topic}
-        VIDEO TITLE: {title_text}
-        Your entire response MUST be a single, valid JSON object with two keys: "character_prompt" and "text_prompt".
+        EXACT VIDEO TITLE: {title_text}
+        Return one valid JSON object only with string keys "character_prompt" and "text_prompt".
         """
         response_text = self._generate_text(prompt, as_json=True)
         try:
@@ -494,18 +554,21 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
         except json.JSONDecodeError:
             logging.error(f"Failed to decode JSON for thumbnail prompts. Raw response: {response_text}")
             return {
-                "character_prompt": f"A photorealistic, cinematic close-up of a person looking shocked and amazed, reacting to the topic of '{topic}'.",
-                "text_prompt": f"A graphic design for a YouTube thumbnail title card. A dark blue background with the text '{title_text}' in large, bold, yellow and white font."
+                "character_prompt": f"{visual_style} A cinematic illustrated scene reacting to the topic '{topic}'.",
+                "text_prompt": f"A high-contrast title card in the channel style, with clear space for the exact title '{title_text}'."
             }
-    
+
     @handle_api_errors
-    def generate_chapter_titles(self, script: str) -> list:
+    def generate_chapter_titles(self, script: str, language: str = "English") -> list:
         logging.info("Identifying logical chapter titles from script...")
+        language = effective_output_language(self.config)
+        language_instruction = format_language_instruction(language, "chapter titles")
         prompt = f"""
-        You are a video editor. Read the following podcast script. Your task is to identify 5-10 main logical chapters or topic shifts in the conversation.
-        The first chapter MUST be "Intro".
+        You are a video editor. Read the following narrated video script and identify 5-10 logical chapters or topic shifts.
+        Keep every chapter title short and use the same words and writing system as the script so the title can be found in the narration.
+        The first chapter should be a short opening title in the script's language.
         Return ONLY a valid JSON list of strings and nothing else. Do not add explanations.
-        Example: ["Intro", "The Early Days", "A Surprising Discovery", "Conclusion"]
+        {language_instruction}
         --- SCRIPT ---
         {script}
         --- END SCRIPT ---
@@ -517,7 +580,7 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
             return json.loads(text)
         except (json.JSONDecodeError, AttributeError):
             logging.error(f"Failed to parse chapter titles JSON. Raw: {getattr(response, 'text', 'NO TEXT')}")
-            return ["Intro"]
+            return ["Кириш" if language.lower().startswith("uzbek") else "Intro"]
 
     @handle_api_errors
     def gemini_nanobanana_image(self, prompt: str, output_path: str):
@@ -547,18 +610,32 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
         logging.info(f"Vertex AI image successfully saved to {output_path}")
 
     @handle_api_errors
-    def fact_check_script(self, script: str, language: str) -> str:
+    def fact_check_script(self, script: str, language: str, research_context: str = "") -> str:
         logging.info("Fact-checking script...")
-        language_instruction = "Your entire response must be in English."
-        if language and language.lower() == 'urdu': language_instruction = "Your entire response must be in Roman Urdu."
-        elif language: language_instruction = f"Your entire response must be in {language}."
-        prompt = f"Review the script for factual accuracy. List issues and suggest corrections.\n{language_instruction}\n\nScript:\n{script}"
+        language = effective_output_language(self.config)
+        language_instruction = format_language_instruction(language, "entire response")
+        if self.config.get("CONTENT_STYLE") == "Stickman History":
+            review_guidance = (
+                "Check dates, names, unit/operation names, and causal claims against reliable historical sources and the supplied dossier. "
+                "Separate well-documented facts from disputed or unsupported claims, flag invented-sounding quotations, "
+                "and suggest careful wording wherever the evidence is uncertain. Do not turn a legend into a fact."
+            )
+        else:
+            review_guidance = "Review the script for factual accuracy, list issues, and suggest corrections."
+        evidence = f"\n\nResearch/evidence dossier:\n{research_context}" if research_context else ""
+        prompt = f"{review_guidance}\n{language_instruction}\n\nScript:\n{script}{evidence}"
         return self._generate_text(prompt)
 
     @handle_api_errors
-    def revise_script(self, script: str, fact_check_results: str) -> str:
+    def revise_script(self, script: str, fact_check_results: str, language: str = "English") -> str:
         logging.info("Revising script based on fact-check...")
-        prompt = f"Revise the script based on the fact-check. Output only the revised script.\n\nFact-Check:\n{fact_check_results}\n\nOriginal Script:\n{script}"
+        language = effective_output_language(self.config)
+        language_instruction = format_language_instruction(language, "revised text")
+        prompt = (
+            "Revise the text using the fact-check notes. Keep supported facts, correct errors, "
+            "and preserve uncertainty where evidence is contested. Output only the revised text.\n\n"
+            f"{language_instruction}\n\nFact-check:\n{fact_check_results}\n\nOriginal text:\n{script}"
+        )
         return self._generate_text(prompt)
 
     @handle_api_errors
@@ -567,7 +644,8 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
         
         script_for_api = script.split('Text :')[-1].strip() if 'Text :' in script else script
         
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent?key={self.api_key}"
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent"
+        api_headers = {"x-goog-api-key": self.api_key}
         
         is_podcast_mode = tts_config.get("CONTENT_STYLE") == "Podcast"
         host_name = tts_config.get("HOST_NAME", "Alex")
@@ -616,10 +694,10 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
                     {"speaker": guest_name, "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": tts_config["SPEAKER2"]}}}
                 ]}}
             else:
-                 payload["generationConfig"]["speechConfig"] = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": tts_config.get("SPEAKER1", "Kore")}}}
+                 payload["generationConfig"]["speechConfig"] = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": tts_config.get("VOICE_NAME", tts_config.get("SPEAKER1", "Kore"))}}}
 
             
-            response = requests.post(api_url, json=payload, timeout=300)
+            response = requests.post(api_url, headers=api_headers, json=payload, timeout=300)
             response.raise_for_status()
             resp_json = response.json()
             candidates = resp_json.get("candidates", [])
