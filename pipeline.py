@@ -24,6 +24,7 @@ import pysubs2
 
 # Import the API client classes
 from api_clients import GoogleClient, WaveSpeedClient, NewsApiClient
+from language_utils import effective_output_language, whisper_language_code
 
 # --- Constants for Pipeline Flow ---
 PIPELINE_STEPS = [
@@ -238,7 +239,7 @@ class Pipeline:
                 research = open(summary_file, "r", encoding="utf-8").read()
                 self.update_status(0, "☑️", 1.0)
             elif "Deep Research" in steps_to_run: 
-                self.update_status(0, "⏳", 0.2); research = self.google_client.deep_research(topic, self.config.get("PODCAST_LANGUAGE"), self.news_client); open(summary_file, "w", encoding="utf-8").write(research); self.update_status(0, "✅", 1.0)
+                self.update_status(0, "⏳", 0.2); research = self.google_client.deep_research(topic, effective_output_language(self.config), self.news_client); open(summary_file, "w", encoding="utf-8").write(research); self.update_status(0, "✅", 1.0)
             elif os.path.exists(summary_file): 
                 research = open(summary_file, "r", encoding="utf-8").read(); self.update_status(0, "☑️", 1.0)
             self._check_stop()
@@ -246,11 +247,11 @@ class Pipeline:
             if "Fact Check Research" in steps_to_run:
                 if self.config.get("FACT_CHECK_ENABLED", False):
                     self.update_status(1, "⏳", 0.2); logging.info("Fact-checking the core research...")
-                    fact_check = self.google_client.fact_check_script(research, self.config.get("PODCAST_LANGUAGE")); self.update_status(1, "✅", 1.0)
+                    fact_check = self.google_client.fact_check_script(research, effective_output_language(self.config)); self.update_status(1, "✅", 1.0)
                     self._check_stop()
                     if "Revise Research" in steps_to_run:
                         self.update_status(2, "⏳", 0.2); logging.info("Revising research based on fact-check...")
-                        research = self.google_client.revise_script(research, fact_check); open(summary_file, "w", encoding="utf-8").write(research); self.update_status(2, "✅", 1.0)
+                        research = self.google_client.revise_script(research, fact_check, effective_output_language(self.config)); open(summary_file, "w", encoding="utf-8").write(research); self.update_status(2, "✅", 1.0)
                 else:
                     logging.info("Fact-checking is disabled. Skipping."); self.update_status(1, "⏭️", 1.0); self.update_status(2, "⏭️", 1.0)
             self._check_stop()
@@ -260,7 +261,15 @@ class Pipeline:
                 script = open(script_file, "r", encoding="utf-8").read()
                 self.update_status(3, "☑️", 1.0)
             elif "Podcast Script" in steps_to_run: 
-                self.update_status(3, "⏳", 0.2); script = self.google_client.generate_podcast_script(topic, research, self.config); open(script_file, "w", encoding="utf-8").write(script); self.update_status(3, "✅", 1.0)
+                self.update_status(3, "⏳", 0.2)
+                script = self.google_client.generate_podcast_script(topic, research, self.config)
+                if self.config.get("FACT_CHECK_ENABLED", False) and self.config.get("CONTENT_STYLE") == "Stickman History":
+                    logging.info("Fact-checking the generated WWII narration against the research dossier...")
+                    language = effective_output_language(self.config)
+                    script_check = self.google_client.fact_check_script(script, language, research)
+                    script = self.google_client.revise_script(script, script_check, language)
+                open(script_file, "w", encoding="utf-8").write(script)
+                self.update_status(3, "✅", 1.0)
             elif os.path.exists(script_file): 
                 script = open(script_file, "r", encoding="utf-8").read(); self.update_status(3, "☑️", 1.0)
             self._check_stop()
@@ -285,7 +294,12 @@ class Pipeline:
                     self.update_status(4, "⏳", 0.2); title_text = seo_title or topic
                     left_path, right_path = os.path.join(output_dir, "thumb_left.png"), os.path.join(output_dir, "thumb_right.png")
                     try:
-                        prompts = self.google_client.generate_thumbnail_prompts(topic, title_text)
+                        prompts = self.google_client.generate_thumbnail_prompts(
+                            topic,
+                            title_text,
+                            self.config.get("CONTENT_STYLE", "Podcast"),
+                            self.config.get("IMAGE_PROMPT_STYLE", "")
+                        )
                         logging.info(f"Character Prompt: {prompts['character_prompt']}")
                         logging.info(f"Text Prompt: {prompts['text_prompt']}")
                         image_engine = self.config.get("IMAGE_ENGINE", "Gemini API")
@@ -337,8 +351,8 @@ class Pipeline:
                     captions_missing = need_captions and not os.path.exists(captions_file)
                     if not self.word_timestamps_for_images or captions_missing:
                         # Whisper uses None for auto-detect or ISO codes like 'en', not full words like 'English'
-                        lang = self.config.get("PODCAST_LANGUAGE", "English")
-                        whisper_lang = None if lang.lower() in ("english", "auto", "") else lang
+                        lang = effective_output_language(self.config)
+                        whisper_lang = whisper_language_code(lang)
                         logging.info(f"Running Whisper transcription. need_captions={need_captions}, captions_missing={captions_missing}, lang={whisper_lang}")
                         self.word_timestamps_for_images = generate_captions(
                             audio_file,
@@ -628,7 +642,9 @@ class Pipeline:
                     logging.info("Generating accurate timestamps locally...")
                     
                     # 1. Get chapter titles from AI (fast, small payload)
-                    chapter_titles = self.google_client.generate_chapter_titles(script)
+                    chapter_titles = self.google_client.generate_chapter_titles(
+                        script, effective_output_language(self.config)
+                    )
                     
                     if not self.word_timestamps_for_images:
                         raise ValueError("Word timestamps are missing, cannot generate chapters.")
