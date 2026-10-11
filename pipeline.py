@@ -246,7 +246,11 @@ class Pipeline:
 
             if "Fact Check Research" in steps_to_run:
                 if self.config.get("FACT_CHECK_ENABLED", False):
-                    self.update_status(1, "⏳", 0.2); logging.info("Fact-checking the core research...")
+                    self.update_status(1, "⏳", 0.2)
+                    if self.config.get("CONTENT_STYLE") == "Stickman History" and not self.config.get("GOOGLE_SEARCH_GROUNDING", False):
+                        logging.info("Running preliminary AI consistency review only; research has not been checked against live sources.")
+                    else:
+                        logging.info("Fact-checking the core research...")
                     fact_check = self.google_client.fact_check_script(research, effective_output_language(self.config)); self.update_status(1, "✅", 1.0)
                     self._check_stop()
                     if "Revise Research" in steps_to_run:
@@ -264,7 +268,10 @@ class Pipeline:
                 self.update_status(3, "⏳", 0.2)
                 script = self.google_client.generate_podcast_script(topic, research, self.config)
                 if self.config.get("FACT_CHECK_ENABLED", False) and self.config.get("CONTENT_STYLE") == "Stickman History":
-                    logging.info("Fact-checking the generated WWII narration against the research dossier...")
+                    if self.config.get("GOOGLE_SEARCH_GROUNDING", False):
+                        logging.info("Fact-checking the generated WWII narration against the research dossier...")
+                    else:
+                        logging.info("Running preliminary AI consistency review on the WWII narration; no live source verification is performed.")
                     language = effective_output_language(self.config)
                     script_check = self.google_client.fact_check_script(script, language, research)
                     script = self.google_client.revise_script(script, script_check, language)

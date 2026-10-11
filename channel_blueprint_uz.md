@@ -12,7 +12,9 @@
 
 ## YouTube «About» учун тайёр матн
 
-Discover World War II’s most astonishing lesser-known operations, covert communications, deception plans, codes, and inventions through stickman animation. Every story is researched carefully: documented facts are separated from disputed claims, and unknowns are stated openly. We do not glorify war—we explore history to understand the past, remember the people affected, and learn from it.
+Discover World War II’s lesser-known operations, covert communications, deception plans, codes, and inventions through stickman animation. We distinguish established history from disputed claims and uncertainty, and we review important claims against credible sources before publication. We do not glorify war—we explore history to understand the past, remember the people affected, and learn from it.
+
+**Муҳим (бепул режа):** AI Content Studio’да WWII Stickman учун жонли Google Search ўчирилган. Дастур тайёрлайдиган тадқиқот — дастлабки AI хулосаси, факт-текширув эса манбаларга мурожаат қилмайдиган изчиллик текширувидир; ҳеч бири ташқи манбалар билан тасдиқланган деб ҳисобланмасин. Эълон қилишдан олдин сана, исм, бўлинма, иқтибос ва бошқа муҳим даъволарни ҳақиқий архив, музей, университет ёки бирламчи ҳужжатлар орқали қўлда текширинг. Дастур мавжуд бўлмаган манба номлари ёки URL’ларни тўқимасликка чақирилади, лекин натижани барибир инсон текшириши шарт.
 
 ## Ҳар бир видео учун қолип
 
@@ -45,4 +47,4 @@ Discover World War II’s most astonishing lesser-known operations, covert commu
 
 ## Студияда тез бошлаш
 
-AI Content Studio'да **Quick Presets → WWII Stickman** ни танланг. Пресет барча сценарий, диктор овози, субтитр, сарлавҳа, тавсиф ва тегларни инглиз тилида тайёрлаш учун мосланган. Шунингдек, стикмен визуал услуби, ҳикоя тузилиши ва факт-текширув созламаларини қўяди. Биринчи мавзу сифатида Ghost Army мисоли киритилади — истасангиз, уни ўз мавзунгизга алмаштиришингиз мумкин. Пресетда инглиз тили қатъий белгиланган, шунинг учун бошқа тилдаги созлама ушбу услубга таъсир қилмайди.
+AI Content Studio'да **Quick Presets → WWII Stickman** ни танланг. Пресет барча сценарий, диктор овози, субтитр, сарлавҳа, тавсиф ва тегларни инглиз тилида тайёрлаш учун мосланган. Шунингдек, стикмен визуал услуби, ҳикоя тузилиши ва дастлабки AI изчиллик-текширув созламаларини қўяди. Бепул режимда жонли Google Search ўчирилгани учун дастур натижаларини ҳақиқий манбалар билан қўлда тасдиқланг; уларни тасдиқланган тадқиқот ёки факт-текширув деб қабул қилманг. Биринчи мавзу сифатида Ghost Army мисоли киритилади — истасангиз, уни ўз мавзунгизга алмаштиришингиз мумкин. Пресетда инглиз тили қатъий белгиланган, шунинг учун бошқа тилдаги созлама ушбу услубга таъсир қилмайди.

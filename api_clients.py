@@ -300,21 +300,48 @@ class GoogleClient:
             external_data = news_client.get_news(topic)
 
         language_instruction = format_language_instruction(language, "output text")
+        # Stickman History defaults to Search-free mode; other styles retain the existing behavior.
+        grounding_enabled = self.config.get(
+            "GOOGLE_SEARCH_GROUNDING", content_style != "Stickman History"
+        )
         logging.info("Research Step 1: Identifying key facets and sub-topics...")
+        if grounding_enabled:
+            research_method_instruction = (
+                f"Using Google Search, perform a deep analysis of the topic '{topic}'. "
+            )
+        else:
+            research_method_instruction = (
+                "Live Google Search is disabled for this free-tier run. Prepare a preliminary analysis "
+                "from learned knowledge only. Do not claim to have searched or verified sources; do not "
+                "invent or name specific sources, institutions, citations, URLs, quotations, or unsupported precise details. "
+                "Mark uncertainty and suggest source types and generic search terms for a human to verify. "
+            )
+        research_focus_instruction = profile.get("research", "")
+        if not grounding_enabled:
+            research_focus_instruction = (
+                "Identify evidence gaps and source types that a human should consult. Do not say that any specific "
+                "record, source, or institution was consulted, and do not provide purported source titles, names, or URLs."
+            )
         facet_prompt = (
-            f"Using Google Search, perform a deep analysis of the topic '{topic}'. "
-            "Identify: "
+            research_method_instruction
+            + "Identify: "
             "1. Key sub-topics and foundational concepts. "
             "2. The main individuals, units, organizations, and locations involved. "
             "3. The primary points of controversy, debate, or public questions. "
-            f"Research focus: {profile.get('research', '')} "
+            f"Research focus: {research_focus_instruction} "
             f"Format this analysis as a structured brief. {language_instruction}"
         )
 
         engine = self.config.get("TEXT_ENGINE", "Gemini API")
         if engine == "Gemini API":
             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent"
-            payload = {"contents": [{"parts": [{"text": facet_prompt}]}], "tools": [{"google_search": {}}]}
+            payload = {"contents": [{"parts": [{"text": facet_prompt}]}]}
+            if grounding_enabled:
+                payload["tools"] = [{"google_search": {}}]
+            else:
+                logging.info(
+                    "Live Google Search grounding is disabled for this run; all generated claims need manual source verification."
+                )
             try:
                 response = requests.post(
                     api_url,
@@ -338,25 +365,39 @@ class GoogleClient:
 
         logging.info("Research Step 2: Synthesizing final summary...")
         if content_style == "Stickman History":
-            synthesis_task = (
-                "Use only the supplied research/search results to build a concise historical dossier. "
-                "Cover the WWII context, dated chronology, key people or units, what happened, and why the "
-                "event is surprising. Include a short list of source titles and organizations/URLs when the "
-                "search results provide them. Never invent a source, date, quote, or motive. Clearly label "
-                "documented facts, disputed interpretations, and claims that remain unverified; say when evidence is uncertain."
-            )
+            if grounding_enabled:
+                synthesis_task = (
+                    "Use only the supplied search results to build a concise historical dossier. Cover the WWII context, "
+                    "dated chronology, key people or units, what happened, and why the event is surprising. Include "
+                    "source or organization names and URLs only when they actually appear in the search results. Never invent a source, "
+                    "date, quote, or motive. Clearly label documented facts, disputed interpretations, and claims that "
+                    "remain unverified; say when evidence is uncertain."
+                )
+                synthesis_intro = "Synthesize the supplied Google Search results and preliminary analysis, respecting their evidence status: "
+            else:
+                synthesis_task = (
+                    "Create a preliminary historical dossier from the supplied analysis and learned knowledge. Begin "
+                    "with the exact label 'PRELIMINARY — NOT VERIFIED AGAINST LIVE SOURCES'. Cover the WWII context, "
+                    "chronology, key people or units, what happened, and why the event is surprising. Mark uncertain "
+                    "dates, names, motives, and disputed interpretations. Do not claim that any detail was researched "
+                    "or verified against sources. Never invent source titles, organization names, citations, quotations, or URLs. End with "
+                    "a short checklist of claims that a human must verify, plus source types and generic search terms to consult; "
+                    "do not invent specific organizations or sources."
+                )
+                synthesis_intro = "Use only the preliminary AI analysis (no live search; not source-verified), respecting its evidence status: "
             news_label = "No separate current-news feed was requested for this historical topic."
         else:
             synthesis_task = (
                 "Using ONLY the information provided in the sources above, write a detailed, synthesized summary. "
                 "Cover the topic's background, why it is trending, key facts, primary controversies/debates, and the future outlook."
             )
+            synthesis_intro = "Synthesize the following sources: "
             news_label = "A feed of recent news headlines"
 
         synthesis_prompt = (
             f"You are a research analyst. Create a comprehensive, well-structured summary on '{topic}'. "
-            "Synthesize the following sources: "
-            f"\nSOURCE 1: Preliminary analysis of key facets:\n---START SOURCE 1---\n{facet_analysis}\n---END SOURCE 1---"
+            + synthesis_intro
+            + f"\nSOURCE 1: Preliminary analysis of key facets:\n---START SOURCE 1---\n{facet_analysis}\n---END SOURCE 1---"
             f"\nSOURCE 2: {news_label}:\n---START SOURCE 2---\n{external_data}\n---END SOURCE 2---"
             f"\nYOUR TASK: {synthesis_task} "
             "Ensure the summary is coherent and do not add unsupported details. "
@@ -432,6 +473,14 @@ class GoogleClient:
 
         length_instruction = f"The total word count must be appropriate for a '{script_length}' spoken video."
         story_arc_prompt = f"Structure the script to follow the '{story_arc}' narrative arc." if story_arc != "None" else ""
+        source_integrity_instruction = ""
+        if content_style == "Stickman History" and not config.get("GOOGLE_SEARCH_GROUNDING", False):
+            source_integrity_instruction = (
+                "This free-mode research dossier was generated without live web search and has not been independently verified. "
+                "Treat it as preliminary: do not present claims as confirmed, invent or imply citations/source names/URLs/quotes, "
+                "or add precise historical details not supported by the dossier. Preserve its uncertainty and remind the creator "
+                "to check important claims against real historical sources before publishing."
+            )
 
         if is_podcast_mode:
             logging.info("Generating DUAL-SPEAKER script for Podcast mode.")
@@ -510,6 +559,7 @@ You are an expert scriptwriter specializing in '{content_style}' content. Create
 ```
 {research}
 ```
+**SOURCE STATUS & INTEGRITY:** {source_integrity_instruction}
 Generate the complete script now, ensuring all vocal directions match the '{content_style}' style.
 """
 
@@ -611,15 +661,30 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
 
     @handle_api_errors
     def fact_check_script(self, script: str, language: str, research_context: str = "") -> str:
-        logging.info("Fact-checking script...")
+        if (
+            self.config.get("CONTENT_STYLE") == "Stickman History"
+            and not self.config.get("GOOGLE_SEARCH_GROUNDING", False)
+        ):
+            logging.info("Performing preliminary AI consistency review only; no live source verification is available.")
+        else:
+            logging.info("Fact-checking script...")
         language = effective_output_language(self.config)
         language_instruction = format_language_instruction(language, "entire response")
         if self.config.get("CONTENT_STYLE") == "Stickman History":
-            review_guidance = (
-                "Check dates, names, unit/operation names, and causal claims against reliable historical sources and the supplied dossier. "
-                "Separate well-documented facts from disputed or unsupported claims, flag invented-sounding quotations, "
-                "and suggest careful wording wherever the evidence is uncertain. Do not turn a legend into a fact."
-            )
+            if self.config.get("GOOGLE_SEARCH_GROUNDING", False):
+                review_guidance = (
+                    "Check dates, names, unit/operation names, and causal claims against reliable historical sources and the supplied dossier. "
+                    "Separate well-documented facts from disputed or unsupported claims, flag invented-sounding quotations, "
+                    "and suggest careful wording wherever the evidence is uncertain. Do not turn a legend into a fact."
+                )
+            else:
+                review_guidance = (
+                    "IMPORTANT: Live source search is disabled. This is only a preliminary consistency review against the supplied "
+                    "dossier and general historical knowledge; it is NOT external fact-checking and you must not say that claims "
+                    "were verified. Check dates, names, unit/operation names, and causal claims for internal plausibility; separate "
+                    "disputed or unsupported claims, flag invented-sounding quotations, preserve uncertainty, and list the exact "
+                    "claims that a human must verify against reliable historical sources. Never invent citations, source or organization names, or URLs."
+                )
         else:
             review_guidance = "Review the script for factual accuracy, list issues, and suggest corrections."
         evidence = f"\n\nResearch/evidence dossier:\n{research_context}" if research_context else ""
@@ -631,10 +696,22 @@ Generate the complete script now, ensuring all vocal directions match the '{cont
         logging.info("Revising script based on fact-check...")
         language = effective_output_language(self.config)
         language_instruction = format_language_instruction(language, "revised text")
+        source_status_instruction = ""
+        if (
+            self.config.get("CONTENT_STYLE") == "Stickman History"
+            and not self.config.get("GOOGLE_SEARCH_GROUNDING", False)
+        ):
+            source_status_instruction = (
+                "No live sources were consulted, so this review is preliminary. Do not upgrade any claim to externally verified, "
+                "add citations/source names/URLs, or remove uncertainty markers. Keep the need for human source verification clear. "
+                "If revising a research dossier, retain its exact 'PRELIMINARY — NOT VERIFIED AGAINST LIVE SOURCES' status label; "
+                "if revising narration, do not read that internal production label aloud."
+            )
         prompt = (
-            "Revise the text using the fact-check notes. Keep supported facts, correct errors, "
-            "and preserve uncertainty where evidence is contested. Output only the revised text.\n\n"
-            f"{language_instruction}\n\nFact-check:\n{fact_check_results}\n\nOriginal text:\n{script}"
+            "Revise the text using the review notes. Keep supported facts, correct errors, "
+            "and preserve uncertainty where evidence is contested. Output only the revised text. "
+            f"{source_status_instruction}\n\n"
+            f"{language_instruction}\n\nFact-check/review notes:\n{fact_check_results}\n\nOriginal text:\n{script}"
         )
         return self._generate_text(prompt)
 
