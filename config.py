@@ -48,6 +48,12 @@ def load_config():
         "WAVESPEED_VIDEO_MODEL": "wavespeed-ai/ltx-2.3-text-to-video",
         "WAVESPEED_AUDIO_MODEL": "elevenlabs/text-to-speech",
         "NEWS_API_KEY": "",
+        "GOOGLE_SEARCH_GROUNDING": bool(
+            config_data.get(
+                "GOOGLE_SEARCH_GROUNDING",
+                config_data.get("CONTENT_STYLE", "Podcast") != "Stickman History",
+            )
+        ),
         "VIDEO_ENGINE": "WaveSpeed AI",
         "IMAGE_ENGINE": "Gemini API",
         "TEXT_ENGINE": "Gemini API",

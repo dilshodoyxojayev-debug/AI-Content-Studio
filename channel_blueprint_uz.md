@@ -14,7 +14,7 @@
 
 Discover World War II’s lesser-known operations, covert communications, deception plans, codes, and inventions through stickman animation. We distinguish established history from disputed claims and uncertainty, and we review important claims against credible sources before publication. We do not glorify war—we explore history to understand the past, remember the people affected, and learn from it.
 
-**Муҳим (бепул режа):** AI Content Studio’да WWII Stickman учун жонли Google Search ўчирилган. Дастур тайёрлайдиган тадқиқот — дастлабки AI хулосаси, факт-текширув эса манбаларга мурожаат қилмайдиган изчиллик текширувидир; ҳеч бири ташқи манбалар билан тасдиқланган деб ҳисобланмасин. Эълон қилишдан олдин сана, исм, бўлинма, иқтибос ва бошқа муҳим даъволарни ҳақиқий архив, музей, университет ёки бирламчи ҳужжатлар орқали қўлда текширинг. Дастур мавжуд бўлмаган манба номлари ёки URL’ларни тўқимасликка чақирилади, лекин натижани барибир инсон текшириши шарт.
+**Муҳим:** умумий услубларда жонли Google Search grounding дастлаб ёқилган, WWII Stickman пресетида эса ўчирилган. Бепул квотани эҳтиёт қилиш ёки AI-only тадқиқот учун **Settings → API Keys** бўлимида **Use live Google Search grounding** белгисини олиб ташланг. Ўчирилганда Search ва NewsAPI сўровлари берилмайди; натижа дастлабки AI хулосаси бўлади, “факт-текширув” эса ташқи манбалар билан тасдиқлаш эмас, изчиллик текширувидир. Эълон қилишдан олдин сана, исм, бўлинма, иқтибос ва бошқа муҳим даъволарни ҳақиқий архив, музей, университет ёки бирламчи ҳужжатлар орқали қўлда текширинг. Дастур манба/ташкилот номлари, сарлавҳа, иқтибос ёки URL’ларни тўқимасликка чақирилади, аммо натижани инсон текшириши шарт.
 
 ## Ҳар бир видео учун қолип
 

@@ -247,10 +247,12 @@ class Pipeline:
             if "Fact Check Research" in steps_to_run:
                 if self.config.get("FACT_CHECK_ENABLED", False):
                     self.update_status(1, "⏳", 0.2)
-                    if self.config.get("CONTENT_STYLE") == "Stickman History" and not self.config.get("GOOGLE_SEARCH_GROUNDING", False):
+                    if not self.config.get(
+                        "GOOGLE_SEARCH_GROUNDING", self.config.get("CONTENT_STYLE") != "Stickman History"
+                    ):
                         logging.info("Running preliminary AI consistency review only; research has not been checked against live sources.")
                     else:
-                        logging.info("Fact-checking the core research...")
+                        logging.info("Fact-checking the core research against live research inputs...")
                     fact_check = self.google_client.fact_check_script(research, effective_output_language(self.config)); self.update_status(1, "✅", 1.0)
                     self._check_stop()
                     if "Revise Research" in steps_to_run:

@@ -631,6 +631,18 @@ class App(ctk.CTk):
         
         ctk.CTkLabel(api_tab, text="Ollama Model").grid(row=12, column=0, sticky="w", padx=10, pady=8)
         self.ollama_model_entry = ctk.CTkEntry(api_tab, width=400); self.ollama_model_entry.grid(row=12, column=1, columnspan=2, padx=10, sticky="ew")
+        self.google_search_grounding_var = ctk.BooleanVar(value=False)
+        self.google_search_grounding_check = ctk.CTkCheckBox(
+            api_tab,
+            text="Use live Google Search grounding (uses additional quota)",
+            variable=self.google_search_grounding_var,
+        )
+        self.google_search_grounding_check.grid(row=13, column=0, columnspan=3, sticky="w", padx=10, pady=(12, 4))
+        ctk.CTkLabel(
+            api_tab,
+            text="Requires Gemini API text engine. Off: preliminary AI-only research; verify important claims manually.",
+            anchor="w",
+        ).grid(row=14, column=0, columnspan=3, sticky="w", padx=28, pady=(0, 8))
 
         voice_list = [f"{v} — {d}" for v, d in VOICE_OPTIONS.items()]
         ctk.CTkLabel(persona_tab, text="Single-Speaker Voice").grid(row=0, column=0, sticky="w", padx=10, pady=8)
@@ -1132,6 +1144,7 @@ class App(ctk.CTk):
             settings = WWII_STICKMAN_SETTINGS
             self.content_style_combo.set(settings["CONTENT_STYLE"])
             self.update_features_based_on_style(settings["CONTENT_STYLE"])
+            self.google_search_grounding_var.set(settings.get("GOOGLE_SEARCH_GROUNDING", False))
             self.main_aspect_ratio_combo.set(settings["VIDEO_ASPECT_RATIO"])
             self.aspect_ratio_combo.set(settings["VIDEO_ASPECT_RATIO"])
             self.start_step_combo.set("Deep Research")
@@ -1294,6 +1307,7 @@ class App(ctk.CTk):
         self.config["GEMINI_API_KEY"] = self.gemini_key_entry.get().strip()
         self.config["WAVESPEED_AI_KEY"] = self.wavespeed_key_entry.get().strip()
         self.config["NEWS_API_KEY"] = self.news_api_key_entry.get().strip()
+        self.config["GOOGLE_SEARCH_GROUNDING"] = self.google_search_grounding_var.get()
         self.config["VIDEO_ENGINE"] = self.video_engine_combo.get()
         self.config["IMAGE_ENGINE"] = self.image_engine_combo.get()
         self.config["AUDIO_ENGINE"] = self.audio_engine_combo.get()
@@ -1356,6 +1370,9 @@ class App(ctk.CTk):
         self.gemini_key_entry.insert(0, cfg.get("GEMINI_API_KEY", ""))
         self.wavespeed_key_entry.insert(0, cfg.get("WAVESPEED_AI_KEY", ""))
         self.news_api_key_entry.insert(0, cfg.get("NEWS_API_KEY", ""))
+        self.google_search_grounding_var.set(
+            cfg.get("GOOGLE_SEARCH_GROUNDING", cfg.get("CONTENT_STYLE", "Podcast") != "Stickman History")
+        )
         self.facebook_token_entry.insert(0, cfg.get("FACEBOOK_ACCESS_TOKEN", ""))
         self.speaker1_combo.set(f"{cfg['SPEAKER1']} — {VOICE_OPTIONS.get(cfg['SPEAKER1'], '')}")
         self.speaker2_combo.set(f"{cfg['SPEAKER2']} — {VOICE_OPTIONS.get(cfg['SPEAKER2'], '')}")

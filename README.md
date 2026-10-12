@@ -27,9 +27,9 @@ This application was created by **Naqash Afzal**.
 ## ✨ Key Features  
 
 ### 📝 Automated Research & Scripting  
-- **Deep Research**: Uses Google Search grounding where enabled. WWII Stickman free mode disables live grounding and produces a preliminary, unverified dossier.
-- **News Integration**: Pulls live headlines via NewsAPI for styles that use the news feed.
-- **Fact-Checking & Revision**: Optional AI review and revision; it is not external source verification unless sources are actually provided.
+- **Deep Research**: Optional Google Search grounding; it is on by default for general styles and off in the WWII Stickman preset.
+- **News Integration**: Live headlines are requested only when live research is enabled and the selected style uses them.
+- **Fact-Checking & Revision**: Optional AI review; with live research off, it is only a preliminary consistency check, not external verification.
 - **Dynamic Scriptwriting**: Generates scripts for podcasts, documentaries, stories & more.  
 
 ### 🎙️ AI Voice & Audio Generation  
@@ -85,8 +85,8 @@ This application was created by **Naqash Afzal**.
 
 ### 2. Clone Repository  
 ```bash
-git clone https://github.com/your-username/Nullpk-Ai-Content-Studio.git
-cd Nullpk-Ai-Content-Studio
+git clone https://github.com/dilshodoyxojayev-debug/AI-Content-Studio.git
+cd AI-Content-Studio
 ```
 
 ### 3. Virtual Environment  
@@ -142,7 +142,7 @@ The GUI will launch.
 ### WWII Stickman history channel
 Choose **Quick Presets → WWII Stickman** to load a ready-made English-language channel setup for WWII history told through consistent stick-figure illustrations. Scripts, narration, captions, chapter titles, SEO titles/descriptions, and tags are locked to English for this style. The preset also enables a historical research/review focus, thumbnails, and a sample first topic about the Ghost Army. Replace the sample topic with your own before generating if you prefer.
 
-**Free-tier source limitation:** live Google Search grounding is disabled for WWII Stickman. The generated dossier is labeled preliminary, and its “fact-check” is only an AI consistency review—not verification against live or cited sources. The prompts instruct the model not to invent source or institution names, titles, citations, or URLs. Manually verify dates, names, units, quotations, and other important claims against real primary records or reputable archives, museums, universities, or scholarly works before publishing. Disabling Search may avoid that specific grounding request, but other Gemini requests still have free-tier quotas and can also be rate-limited.
+**Source and quota setting:** live Google Search grounding is on by default for general styles (including Documentary) and off in the WWII Stickman preset. In **Settings → API Keys**, uncheck **Use live Google Search grounding** for Search-free mode. That skips Search and NewsAPI research, labels the dossier preliminary, and limits “fact-checking” to AI consistency review—not external verification. Live Search uses available API quota and may be rate-limited; this setup does not assume a paid plan. In either mode, manually verify important claims before publishing.
 
 See [`channel_blueprint_uz.md`](channel_blueprint_uz.md) for the channel’s English About text, episode ideas, and editorial guidelines (explained in Uzbek).
 

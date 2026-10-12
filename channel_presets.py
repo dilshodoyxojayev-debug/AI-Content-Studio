@@ -9,6 +9,7 @@ WWII_STICKMAN_SAMPLE_TOPIC = (
 WWII_STICKMAN_SETTINGS = {
     "CHANNEL_NAME": "Stickman: WWII Secrets",
     "CONTENT_STYLE": "Stickman History",
+    "GOOGLE_SEARCH_GROUNDING": False,
     "PODCAST_LANGUAGE": "English",
     "LANGUAGE_ENABLED": True,
     "TEXT_ENGINE": "Gemini API",
