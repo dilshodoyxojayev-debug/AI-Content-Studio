@@ -48,6 +48,12 @@ def load_config():
         "WAVESPEED_VIDEO_MODEL": "wavespeed-ai/ltx-2.3-text-to-video",
         "WAVESPEED_AUDIO_MODEL": "elevenlabs/text-to-speech",
         "NEWS_API_KEY": "",
+        "GOOGLE_SEARCH_GROUNDING": bool(
+            config_data.get(
+                "GOOGLE_SEARCH_GROUNDING",
+                config_data.get("CONTENT_STYLE", "Podcast") != "Stickman History",
+            )
+        ),
         "VIDEO_ENGINE": "WaveSpeed AI",
         "IMAGE_ENGINE": "Gemini API",
         "TEXT_ENGINE": "Gemini API",
@@ -56,6 +62,7 @@ def load_config():
         "WAVESPEED_TEXT_MODEL": "meta-llama/llama-3.3-70b-instruct",
         "SPEAKER1": "Kore",
         "SPEAKER2": "Puck",
+        "VOICE_NAME": "Autonoe",
         "HOST_NAME": "Alex",
         "GUEST_NAME": "Maya",
         "HOST_PERSONA": "A friendly podcast host who loves technology.",
@@ -64,6 +71,7 @@ def load_config():
         "SUBSCRIBE_COUNT": 3,
         "SUBSCRIBE_MESSAGE": "Don’t forget to subscribe to {channel} for more awesome content!",
         "SUBSCRIBE_RANDOM": True,
+        "SINGLE_SPEAKER_CTA": False,
         "PODCAST_STYLE": "Informative News",
         "VIDEO_PROMPT_BASE_STYLE": "An animated and cinematic video. High-quality, 24fps.",
         "IMAGE_PROMPT_STYLE": "A cinematic, photorealistic image representing the podcast topic: {topic}",
